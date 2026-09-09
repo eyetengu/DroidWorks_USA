@@ -1,0 +1,47 @@
+/*
+  Lesson 2 – RCWL-0516 + Arduino Nano
+  Serial output designed for a ROS2 node
+
+  Format:
+    motion:1   → Motion detected
+    motion:0   → No motion
+*/
+
+const int motionPin = 2;      // RCWL OUT → D2
+const int ledPin = 13;        // Built-in LED
+
+int currentState = 0;
+int previousState = 0;
+
+void setup() {
+  pinMode(motionPin, INPUT);
+  pinMode(ledPin, OUTPUT);
+  
+  Serial.begin(9600);
+  
+  // Optional: send a ready message once
+  Serial.println("rcwl_ready");
+  
+  previousState = digitalRead(motionPin);
+}
+
+void loop() {
+  currentState = digitalRead(motionPin);
+
+  // Only publish when the state changes
+  if (currentState != previousState) {
+    
+    if (currentState == HIGH) {
+      digitalWrite(ledPin, HIGH);
+      Serial.println("motion:1");      // Motion detected
+    } 
+    else {
+      digitalWrite(ledPin, LOW);
+      Serial.println("motion:0");      // No motion
+    }
+    
+    previousState = currentState;
+  }
+
+  delay(20);   // Small debounce / stability delay
+}
