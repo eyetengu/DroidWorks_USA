@@ -1,18 +1,3 @@
-Create Entry Node
--in the ROS2 project create an entry node for the mcu/pir module
--the entry node is titled '03_PIR_entryNode'
--add entry node to setup.py 'entry-points'
-
-BSR(Build/Source/Run)
--navigate to the workspace and BUILD the project (colcon build)
--SOURCE the project (source install/setup.bash)
--RUN the node (ros2 run <project name> <node name>)
-
-Verify the results
--test the sensors ability to detect motion and transmit serial data to the droid brain
--open a new terminal and use 'ros2 topic echo <topic name> (/pir_state)
--success should appear as serial data printing to terminal
-
 **DroidWorks U.S.A. – PIR Sensor Module**  
 **Lesson Set 01 | 01_PIR_Serial**
 
