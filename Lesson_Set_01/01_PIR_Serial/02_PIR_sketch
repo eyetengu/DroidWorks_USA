@@ -1,0 +1,33 @@
+const int pirPin = 2;
+const int ledPin = 13;
+int lastState = LOW;
+
+void setup() {
+  pinMode(pirPin, INPUT);
+  pinMode(ledPin, OUTPUT);
+
+  Serial.begin(115200);
+
+  digitalWrite(ledPin, LOW);
+  delay(2000);
+
+  // Establish the initial state after the PIR settles.
+  lastState = digitalRead(pirPin);
+  Serial.print("MOTION:");
+  Serial.println(lastState);
+}
+
+void loop() {
+  int currentState = digitalRead(pirPin);
+
+  if (currentState != lastState) {
+    digitalWrite(ledPin, currentState);
+
+    Serial.print("MOTION:");
+    Serial.println(currentState);
+
+    lastState = currentState;
+  }
+
+  delay(50);
+}
