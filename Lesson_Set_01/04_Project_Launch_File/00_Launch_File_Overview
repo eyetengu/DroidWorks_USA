@@ -1,0 +1,5 @@
+this is a good time to develop a launch file that will allow us to launch our three current nodes and any future nodes with a single command line entry
+
+our launch file will launch the pir, rcwl and sensorFusion_motion nodes
+
+to create the launch file we will create a separate(adjunct) project that will have the launch.py file located inside
