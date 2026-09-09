@@ -26,9 +26,9 @@ Create Entry Node
 -add entry node to setup.py 'entry-points'
 
 BSR(Build/Source/Run)
--navigate to the workspace and build the project (colcon build)
--source the project (source install/setup.bash)
--run the node (ros2 run <project name> <node name>)
+-navigate to the workspace and BUILD the project (colcon build)
+-SOURCE the project (source install/setup.bash)
+-RUN the node (ros2 run <project name> <node name>)
 
 Verify the results
 -test the sensors ability to detect motion and transmit serial data to the droid brain
