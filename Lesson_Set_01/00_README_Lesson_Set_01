@@ -3,6 +3,7 @@ Basic Sensors (Individual)
 Topic List
  /pir_state
  /rcwl_state
+ /fused_motion
 
 This is the foundation set.
 In Lesson Set 01 you will build and test the individual sensors one at a time, turn their raw output into clean ROS2 topics, fuse the related sensors, and create simple state nodes that the rest of the system can listen to.
