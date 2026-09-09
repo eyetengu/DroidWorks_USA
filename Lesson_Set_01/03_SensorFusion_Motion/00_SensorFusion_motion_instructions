@@ -1,0 +1,34 @@
+this node will take in the following topics:
+- /motion
+- /pir_state
+
+this node will then output data in the following format
+- pir:x, rcwl:x
+
+this will result in one of the following 4 conditions:
+- pir:0, rcwl:0
+- pir:1, rcwl:0
+- pir:0, rcwl:1
+- pir:1, rcwl:1
+
+this data will be transmitted via the following topic:
+- /fusedMotion
+
+this topic will be consumed by the State_motion node
+
+
+Create the node
+- create the node using '01_SensorFusion_motion_node'
+- add node to setup.py 'entry-points
+
+BSR
+- navigate to the workspace
+- BUILD- colcon build
+- SOURCE- source install/setup.bash
+- RUN- pir node
+- RUN- rcwl node
+- RUN- SensorFusion_motion node
+
+Verify Results
+- open separate terminals for each node and use ros2 topic echo </topic name>
+- the terminal windows should show correct and useful data for each of the individual topics as well as for the fused topic
