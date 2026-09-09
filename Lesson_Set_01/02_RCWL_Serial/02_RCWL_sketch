@@ -3,8 +3,8 @@
   Serial output designed for a ROS2 node
 
   Format:
-    motion:1   → Motion detected
-    motion:0   → No motion
+    rcwl:1   → Motion detected
+    rcwl:0   → No motion
 */
 
 const int motionPin = 2;      // RCWL OUT → D2
@@ -33,11 +33,11 @@ void loop() {
     
     if (currentState == HIGH) {
       digitalWrite(ledPin, HIGH);
-      Serial.println("motion:1");      // Motion detected
+      Serial.println("rcwl:1");      // Motion detected
     } 
     else {
       digitalWrite(ledPin, LOW);
-      Serial.println("motion:0");      // No motion
+      Serial.println("rcwl:0");      // No motion
     }
     
     previousState = currentState;
