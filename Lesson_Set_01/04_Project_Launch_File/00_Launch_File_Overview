@@ -1,5 +1,75 @@
-this is a good time to develop a launch file that will allow us to launch our three current nodes and any future nodes with a single command line entry
+**DroidWorks U.S.A. – Motion Sensors Launch File**  
+**Lesson Set 01 | 04_Project_Launch_File**
 
-our launch file will launch the pir, rcwl and sensorFusion_motion nodes
+### Purpose
+This launch file starts the three current motion-related nodes together:
+- PIR entry node
+- RCWL entry node
+- Motion Fusion node
 
-to create the launch file we will create a separate(adjunct) project that will have the launch.py file located inside
+### Create the Launch File
+Create a folder named `launch` inside the package if it does not already exist:
+
+```bash
+mkdir -p ~/droidworks_ws/src/droidworks_sensors/launch
+```
+
+Create the file:
+
+`motion_sensors.launch.py`
+
+```python
+from launch import LaunchDescription
+from launch_ros.actions import Node
+
+def generate_launch_description():
+    return LaunchDescription([
+        Node(
+            package='droidworks_sensors',
+            executable='pir_entry',
+            name='pir_entry',
+            output='screen'
+        ),
+        Node(
+            package='droidworks_sensors',
+            executable='rcwl_entry',
+            name='rcwl_entry',
+            output='screen'
+        ),
+        Node(
+            package='droidworks_sensors',
+            executable='motion_fusion',
+            name='motion_fusion',
+            output='screen'
+        ),
+    ])
+```
+
+### Add Launch Support
+Make sure `setup.py` includes the launch files.  
+In the `data_files` section you should have something like:
+
+ data_files=[
+    ...
+    (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
+ ],
+
+(You will also need `import os` and `from glob import glob` at the top of `setup.py` if they are not already there.)
+
+### BSR (Build / Source / Run)
+ cd ~/droidworks_ws
+ colcon build
+ source install/setup.bash
+
+Launch everything with one command:
+ ros2 launch droidworks_sensors motion_sensors.launch.py
+
+### Verify Results
+In separate terminals:
+ ros2 topic echo /pir_state
+ ros2 topic echo /rcwl_state
+ ros2 topic echo /fused_motion
+
+All three nodes should start together and the topics should update correctly when the sensors are triggered.
+
+Success = all three nodes launch cleanly from a single command and the fused topic reflects both sensors.
