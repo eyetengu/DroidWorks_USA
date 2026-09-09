@@ -1,5 +1,3 @@
-create the workspace
-create the project (python)
 This document creates the ROS2 workspace and Python package that the rest of Lesson Set 01 (and later sets) will use.
 
 1. Create the workspace
