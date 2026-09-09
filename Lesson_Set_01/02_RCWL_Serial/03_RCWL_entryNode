@@ -46,13 +46,13 @@ class RcwlMotionNode(Node):
                     continue
 
                 # Parse messages coming from Arduino
-                if line == "motion:1":
+                if line == "rcwl:1":
                     msg = Bool()
                     msg.data = True
                     self.publisher_.publish(msg)
                     self.get_logger().info('Motion detected → published True')
 
-                elif line == "motion:0":
+                elif line == "rcwl:0":
                     msg = Bool()
                     msg.data = False
                     self.publisher_.publish(msg)
