@@ -28,9 +28,9 @@ Create Entry Node
 BSR(Build/Source/Run)
 -navigate to the workspace and build the project (colcon build)
 -source the project (source install/setup.bash)
--run the node (ros2 run <project name> <node name>
+-run the node (ros2 run <project name> <node name>)
 
 Verify the results
 -test the sensors ability to detect motion and transmit serial data to the droid brain
--open a new terminal and use 'ros2 topic echo <topic name>
+-open a new terminal and use 'ros2 topic echo <topic name> (/pir_state)
 -success should appear as serial data printing to terminal
