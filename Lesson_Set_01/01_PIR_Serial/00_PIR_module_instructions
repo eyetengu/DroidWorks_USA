@@ -22,6 +22,7 @@ Test the Sketch
 Create Entry Node
 -in the ROS2 project create an entry node for the mcu/pir module
 -the entry node is titled '03_PIR_entryNode'
+-add entry node to setup.py 'entry-points'
 
 BSR(Build/Source/Run)
 -navigate to the workspace and build the project (colcon build)
