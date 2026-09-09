@@ -11,6 +11,7 @@ Create the Module
 -connect signal wire to pinD2
 -connect + to mcu VCC
 -connect - to mcu GND
+-verify module with '01_PIR_module.jpeg'
 
 Upload the sketch
 -upload the sketch titled '02_PIR_sketch' to the mcu using the Arduino IDE
