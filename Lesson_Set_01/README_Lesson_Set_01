@@ -21,7 +21,7 @@ Motion Fusion Node
 -Combines PIR and RCWL into a single, more reliable motion signal.
 
 Ultrasonic Sensor Module
--Sketch + ROS2 node. Classic distance measurement.
+-mcu/sensor module + Sketch + ROS2 node. Classic distance measurement.
 
 Time-of-Flight (ToF) Sensor Module
 -mcu/sensor module + Sketch + ROS2 node. More precise distance measurement.
