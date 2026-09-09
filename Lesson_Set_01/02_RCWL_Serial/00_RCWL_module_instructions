@@ -1,36 +1,48 @@
-Bill Of Materials
--Arduino Nano
--(opt.) terminal socket for Nano mcu
--rcwl_056 sensor
--3 jumper wires
--Arduino IDE
--Ubuntu(Linux) OS
--Jazzy(ROS2 Distro)
+**DroidWorks U.S.A. – RCWL Sensor Module**  
+**Lesson Set 01 | 02_RCWL_Serial**
 
-Create the Module
--connect signal wire to pinD2
--connect + to mcu VCC
--connect - to mcu GND
--verify module with '01_RCWL_module.jpg'
+### Bill of Materials
+- Arduino Nano  
+- (optional) terminal socket for Nano  
+- RCWL-0516 sensor  
+- 3 jumper wires  
+- Arduino IDE  
+- Ubuntu (Linux)  
+- ROS 2 Jazzy  
 
-Upload the sketch
--upload the sketch titled '02_RCWL_sketch' to the mcu using the Arduino IDE
+### Create the Module
+- Connect RCWL signal wire → Nano pin D2  
+- Connect RCWL + → Nano 5V (VCC)  
+- Connect RCWL – → Nano GND  
+- Verify wiring against `01_RCWL_module.jpg`
 
-Test the Sketch
--Verify that the module and sketch are working properly.
--proper operation should show valid data in the serial display
+### Upload the Sketch
+- Open `02_RCWL_sketch` in the Arduino IDE  
+- Upload to the Nano  
 
-Create Entry Node
--in the ROS2 project create an entry node for the mcu/rcwl module
--the entry node is titled '03_RCWL_entryNode'
--add entry node to setup.py 'entry-points'
+### Test the Sketch
+- Open the Serial Monitor (115200 baud)  
+- Move in front of the sensor  
+- You should see lines appear only when the state changes:  
+  `MOTION:1` or `MOTION:0`  
+- The onboard LED (pin 13) should also turn on/off with detection  
 
-BSR(Build/Source/Run)
--navigate to the workspace and BUILD the project (colcon build)
--SOURCE the project (source install/setup.bash)
--RUN the node (ros2 run <project name> <node name>)
+### Create the Entry Node
+- Place the node file `03_RCWL_entryNode` into the package  
+- Add the entry point in `setup.py`:
+   'rcwl_entry = droidworks_sensors.rcwl_entry:main',
 
-Verify the results
--test the sensors ability to detect motion and transmit serial data to the droid brain
--open a new terminal and use 'ros2 topic echo <topic name> (/motion)
--success should appear as serial data printing to terminal
+### BSR (Build / Source / Run)
+ cd ~/droidworks_ws
+ colcon build
+ source install/setup.bash
+ ros2 run droidworks_sensors rcwl_entry
+
+### Verify Results
+- In a new terminal:
+   ros2 topic echo /rcwl_state
+
+- Trigger the RCWL  
+- You should see `data: true` and `data: false` published when motion is detected or cleared  
+
+Success = clean `MOTION:0/1` serial output from the Nano **and** matching Boolean messages on `/rcwl_state`.
