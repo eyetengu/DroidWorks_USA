@@ -5,20 +5,17 @@
 This node subscribes to the two individual motion sensors and publishes a combined result.
 
 **Inputs**
-- `/pir_state` (Bool)
-- `/rcwl_state` (Bool)
+ /pir_state (Bool)
+ /rcwl_state (Bool)
 
 **Output**
-- `/fused_motion`
+ /fused_motion
 
 The output is published in the following format:
-
-```
-pir:0, rcwl:0
-pir:1, rcwl:0
-pir:0, rcwl:1
-pir:1, rcwl:1
-```
+ pir:0, rcwl:0
+ pir:1, rcwl:0
+ pir:0, rcwl:1
+ pir:1, rcwl:1
 
 This topic will later be consumed by the Motion State Node.
 
