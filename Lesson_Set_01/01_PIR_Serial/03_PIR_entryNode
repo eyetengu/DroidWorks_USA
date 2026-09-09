@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""
+Open Droid Lab — PIR Serial Reader Lesson
+
+Built from:
+  - Basic_OOP_Template
+  - ROS2Node_02_Insert_SERIAL
+
+Reads MOTION:0 / MOTION:1 from an Arduino Nano
+and publishes the state on /pir_state.
+"""
+
+import rclpy
+from rclpy.node import Node
+
+from std_msgs.msg import Bool
+import serial
+import serial.tools.list_ports
+
+
+SERIAL_PORT = '/dev/ttyUSB0'
+BAUD_RATE = 115200
+
+
+class ODLNode(Node):
+    """Open Droid Lab PIR serial-reader node."""
+
+    def __init__(self):
+        super().__init__('odl_node')
+
+        self.get_logger().info('ODL PIR node started')
+
+        self.publisher_ = self.create_publisher(
+            Bool,
+            '/pir_state',
+            10
+        )
+
+        self.ser = None
+        self._open_serial()
+
+        self.create_timer(
+            0.05,
+            self._serial_timer_callback
+        )
+
+    def _open_serial(self):
+        try:
+            self.ser = serial.Serial(
+                SERIAL_PORT,
+                BAUD_RATE,
+                timeout=0.01
+            )
+
+            self.get_logger().info(
+                f'Serial opened: {SERIAL_PORT} @ {BAUD_RATE}'
+            )
+
+        except serial.SerialException as e:
+            self.get_logger().error(
+                f'Could not open {SERIAL_PORT}: {e}'
+            )
+
+            for p in serial.tools.list_ports.comports():
+                self.get_logger().info(
+                    f'  {p.device} — {p.description}'
+                )
+
+            self.ser = None
+
+    def _serial_timer_callback(self):
+        if self.ser is None or not self.ser.is_open:
+            return
+
+        try:
+            while self.ser.in_waiting > 0:
+                raw = self.ser.readline()
+
+                if not raw:
+                    break
+
+                line = raw.decode(
+                    'utf-8',
+                    errors='ignore'
+                ).strip()
+
+                if line:
+                    self._handle_line(line)
+
+        except serial.SerialException as e:
+            self.get_logger().error(
+                f'Serial read error: {e}'
+            )
+            self.ser = None
+
+    def _handle_line(self, line: str):
+        if line.startswith('MOTION:'):
+            try:
+                value = int(
+                    line.split(':', 1)[1]
+                )
+
+                msg = Bool()
+                msg.data = bool(value)
+
+                self.publisher_.publish(msg)
+
+                self.get_logger().info(
+                    f'Published /pir_state = {msg.data}'
+                )
+
+            except (ValueError, IndexError):
+                self.get_logger().warn(
+                    f'Bad MOTION line: {line!r}'
+                )
+
+        else:
+            self.get_logger().debug(
+                f'MCU: {line}'
+            )
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = ODLNode()
+
+    try:
+        rclpy.spin(node)
+
+    except KeyboardInterrupt:
+        pass
+
+    finally:
+        node.get_logger().info('Shutting down')
+
+        if node.ser is not None and node.ser.is_open:
+            node.ser.close()
+
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
