@@ -1,25 +1,3 @@
-Bill Of Materials
--Arduino Nano
--(opt.) terminal socket for Nano mcu
--pir sensor
--3 jumper wires
--Arduino IDE
--Ubuntu(Linux) OS
--Jazzy(ROS2 Distro)
-
-Create the Module
--connect signal wire to pinD2
--connect + to mcu VCC
--connect - to mcu GND
--verify module with '01_PIR_module.jpeg'
-
-Upload the sketch
--upload the sketch titled '02_PIR_sketch' to the mcu using the Arduino IDE
-
-Test the Sketch
--Verify that the module and sketch are working properly.
--proper operation should show valid data in the serial display
-
 Create Entry Node
 -in the ROS2 project create an entry node for the mcu/pir module
 -the entry node is titled '03_PIR_entryNode'
@@ -34,3 +12,53 @@ Verify the results
 -test the sensors ability to detect motion and transmit serial data to the droid brain
 -open a new terminal and use 'ros2 topic echo <topic name> (/pir_state)
 -success should appear as serial data printing to terminal
+
+**DroidWorks U.S.A. – PIR Sensor Module**  
+**Lesson Set 01 | 01_PIR_Serial**
+
+### Bill of Materials
+- Arduino Nano  
+- (optional) terminal socket for Nano  
+- PIR sensor  
+- 3 jumper wires  
+- Arduino IDE  
+- Ubuntu (Linux)  
+- ROS 2 Jazzy  
+
+### Create the Module
+- Connect PIR signal wire → Nano pin D2  
+- Connect PIR + → Nano 5V (VCC)  
+- Connect PIR – → Nano GND  
+- Verify wiring against `01_PIR_module.jpeg`
+
+### Upload the Sketch
+- Open `02_PIR_sketch` in the Arduino IDE  
+- Upload to the Nano  
+
+### Test the Sketch
+- Open the Serial Monitor (115200 baud)  
+- Wave your hand in front of the PIR  
+- You should see lines appear only when the state changes:  
+  `MOTION:1` or `MOTION:0`  
+- The onboard LED (pin 13) should also turn on/off with motion  
+
+### Create the Entry Node
+- Place the node file `03_PIR_entryNode` into the package  
+- Add the entry point in `setup.py`:
+   'pir_entry = droidworks_sensors.pir_entry:main',
+
+### BSR (Build / Source / Run)
+ cd ~/droidworks_ws
+ colcon build
+ source install/setup.bash
+ ros2 run droidworks_sensors pir_entry
+
+
+### Verify Results
+- In a new terminal:
+   ros2 topic echo /pir_state
+
+- Trigger the PIR  
+- You should see `data: true` and `data: false` published when motion is detected or cleared  
+
+Success = clean `MOTION:0/1` serial output from the Nano **and** matching Boolean messages on `/pir_state`.
