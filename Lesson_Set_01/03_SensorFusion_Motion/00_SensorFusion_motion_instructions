@@ -1,6 +1,6 @@
 this node will take in the following topics:
-- /motion
 - /pir_state
+- /rcwl_stste
 
 this node will then output data in the following format
 - pir:x, rcwl:x
@@ -12,7 +12,7 @@ this will result in one of the following 4 conditions:
 - pir:1, rcwl:1
 
 this data will be transmitted via the following topic:
-- /fusedMotion
+- /fused_motion
 
 this topic will be consumed by the State_motion node
 
