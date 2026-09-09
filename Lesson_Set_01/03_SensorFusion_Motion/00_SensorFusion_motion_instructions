@@ -1,34 +1,50 @@
-this node will take in the following topics:
-- /pir_state
-- /rcwl_stste
+**DroidWorks U.S.A. – Motion Fusion Node**  
+**Lesson Set 01 | 03_SensorFusion_Motion**
 
-this node will then output data in the following format
-- pir:x, rcwl:x
+### Purpose
+This node subscribes to the two individual motion sensors and publishes a combined result.
 
-this will result in one of the following 4 conditions:
-- pir:0, rcwl:0
-- pir:1, rcwl:0
-- pir:0, rcwl:1
-- pir:1, rcwl:1
+**Inputs**
+- `/pir_state` (Bool)
+- `/rcwl_state` (Bool)
 
-this data will be transmitted via the following topic:
-- /fused_motion
+**Output**
+- `/fused_motion`
 
-this topic will be consumed by the State_motion node
+The output is published in the following format:
 
+```
+pir:0, rcwl:0
+pir:1, rcwl:0
+pir:0, rcwl:1
+pir:1, rcwl:1
+```
 
-Create the node
-- create the node using '01_SensorFusion_motion_node'
-- add node to setup.py 'entry-points
+This topic will later be consumed by the Motion State Node.
 
-BSR
-- navigate to the workspace
-- BUILD- colcon build
-- SOURCE- source install/setup.bash
-- RUN- pir node
-- RUN- rcwl node
-- RUN- SensorFusion_motion node
+### Create the Node
+- Place the node file `01_SensorFusion_motion_node` into the package  
+- Add the entry point in `setup.py`:
+   'motion_fusion = droidworks_sensors.motion_fusion:main',
 
-Verify Results
-- open separate terminals for each node and use ros2 topic echo </topic name>
-- the terminal windows should show correct and useful data for each of the individual topics as well as for the fused topic
+### BSR (Build / Source / Run)
+ cd ~/droidworks_ws
+ colcon build
+ source install/setup.bash
+
+Then run the three nodes (each in its own terminal):
+ ros2 run droidworks_sensors pir_entry
+ ros2 run droidworks_sensors rcwl_entry
+ ros2 run droidworks_sensors motion_fusion
+
+### Verify Results
+Open additional terminals and echo the topics:
+ ros2 topic echo /pir_state
+ ros2 topic echo /rcwl_state
+ ros2 topic echo /fused_motion
+
+Trigger the sensors and confirm:
+- Individual topics show correct true/false values  
+- `/fused_motion` correctly reflects the combination of both sensors  
+
+Success = all three topics update correctly and the fused output matches the actual state of the two sensors.
