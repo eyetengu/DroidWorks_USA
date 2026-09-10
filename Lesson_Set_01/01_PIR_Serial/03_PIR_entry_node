@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-PIR Serial Reader Lesson
+Open Droid Lab — PIR Serial Reader Lesson
 
 Built from:
   - Basic_OOP_Template
   - ROS2Node_02_Insert_SERIAL
 
-Reads pir:0 / pir:1 from an Arduino Nano
+Reads MOTION:0 / MOTION:1 from an Arduino Nano
 and publishes the state on /pir_state.
 """
 
@@ -94,7 +94,7 @@ class ODLNode(Node):
             self.ser = None
 
     def _handle_line(self, line: str):
-        if line.startswith('pir:'):
+        if line.startswith('MOTION:'):
             try:
                 value = int(
                     line.split(':', 1)[1]
