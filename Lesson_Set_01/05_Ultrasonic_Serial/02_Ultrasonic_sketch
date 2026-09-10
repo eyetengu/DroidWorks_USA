@@ -1,1 +1,48 @@
+/*
+  DroidWorks U.S.A. – Ultrasonic Sensor Module
+  Lesson Set 01 | 02_Ultrasonic_sketch
 
+  HC-SR04 wiring:
+    VCC  → 5V
+    GND  → GND
+    Trig → D9
+    Echo → D10
+*/
+
+const int trigPin = 9;
+const int echoPin = 10;
+
+void setup() {
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+  pinMode(LED_BUILTIN, OUTPUT);   // optional visual feedback
+  Serial.begin(115200);
+}
+
+void loop() {
+  // Trigger a measurement
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  // Read the echo pulse (timeout after 30 ms ≈ 5 m)
+  long duration = pulseIn(echoPin, HIGH, 30000);
+
+  float distance_cm = 0.0;
+
+  if (duration > 0) {
+    // Speed of sound ≈ 0.0343 cm/µs, divide by 2 for round trip
+    distance_cm = (duration * 0.0343) / 2.0;
+  }
+
+  // Print in the exact format expected by the entry node
+  Serial.print("ultrasonic:");
+  Serial.println(distance_cm, 1);   // one decimal place
+
+  // Optional: light the onboard LED when object is closer than 20 cm
+  digitalWrite(LED_BUILTIN, (distance_cm > 0 && distance_cm < 20) ? HIGH : LOW);
+
+  delay(50);   // ~20 Hz update rate – good balance for ROS
+}
