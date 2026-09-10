@@ -1,1 +1,50 @@
+**DroidWorks U.S.A. – Ultrasonic Sensor Module**  
+**Lesson Set 01 | 01_Ultrasonic_Serial**
 
+### Bill of Materials
+- Arduino Nano  
+- (optional) terminal socket for Nano  
+- HC-SR04 ultrasonic sensor (or compatible)  
+- 4 jumper wires  
+- Arduino IDE  
+- Ubuntu (Linux)  
+- ROS 2 Jazzy  
+
+### Create the Module
+- Connect HC-SR04 VCC → Nano 5V  
+- Connect HC-SR04 GND → Nano GND  
+- Connect HC-SR04 Trig → Nano pin D9  
+- Connect HC-SR04 Echo → Nano pin D10  
+- Verify wiring against `01_Ultrasonic_module.jpeg`
+
+### Upload the Sketch
+- Open `02_Ultrasonic_sketch` in the Arduino IDE  
+- Upload to the Nano  
+
+### Test the Sketch
+- Open the Serial Monitor (115200 baud)  
+- Point the sensor at a surface or wave an object in front of it  
+- You should see continuous distance readings in centimeters, e.g.:  
+  `ultrasonic:15.4`  
+  `ultrasonic:8.2`  
+- Readings should update rapidly and change as the distance changes  
+- (Optional) The onboard LED (pin 13) can blink or stay on when an object is within a threshold (e.g., < 20 cm) if implemented in the sketch  
+
+### Create the Entry Node
+- Place the node file `03_Ultrasonic_entryNode` into the package  
+- Add the entry point in `setup.py`:  
+  `'ultrasonic_entry = droidworks_sensors.ultrasonic_entry:main',`
+
+### BSR (Build / Source / Run)
+ cd ~/droidworks_ws
+ colcon build
+ source install/setup.bash
+ ros2 run droidworks_sensors ultrasonic_entry
+
+### Verify Results
+- In a new terminal:  
+  `ros2 topic echo /ultrasonic_distance`  
+- Move an object in front of the sensor  
+- You should see floating-point distance values (in cm or meters, depending on the node) published continuously, matching the Serial Monitor output  
+
+**Success** = clean continuous `ultrasonic:XX.X` serial output from the Nano **and** matching distance messages on `/ultrasonic_distance`.
