@@ -24,7 +24,7 @@
 - Open the Serial Monitor (115200 baud)  
 - Move in front of the sensor  
 - You should see lines appear only when the state changes:  
-  `MOTION:1` or `MOTION:0`  
+  `rcwl:1` or `rcwl:0`  
 - The onboard LED (pin 13) should also turn on/off with detection  
 
 ### Create the Entry Node
@@ -45,4 +45,4 @@
 - Trigger the RCWL  
 - You should see `data: true` and `data: false` published when motion is detected or cleared  
 
-Success = clean `MOTION:0/1` serial output from the Nano **and** matching Boolean messages on `/rcwl_state`.
+Success = clean `rcwl:0/1` serial output from the Nano **and** matching Boolean messages on `/rcwl_state`.
