@@ -1,1 +1,36 @@
+DroidWorks U.S.A. – Sensor Fusion Motion Module
 
+Lesson Set 01 | 01_SensorFusion_Motion
+
+Bill of Materials
+ Working PIR entry node (/pir_state)
+ Working RCWL entry node (/rcwl_state)
+ Ubuntu (Linux)
+ ROS 2 Jazzy
+ Existing droidworks_sensors package
+
+Purpose
+This module fuses the two motion sensors (PIR + RCWL) into a single higher-level motion state using the 4-state matrix:
+It also provides a simple confidence indication based on sensor agreement.
+
+Create the Node
+ Place the node file 06_SensorFusion_Motion into the package
+ Add the entry point in setup.py:
+  'sensorfusion_motion = droidworks_sensors.sensorfusion_motion:main',
+
+BSR (Build / Source / Run)
+ cd ~/droidworks_ws
+ colcon build --packages-select droidworks_sensors
+ source install/setup.bash
+ ros2 run droidworks_sensors sensorfusion_motion
+
+Verify Results
+ Bashros2 topic echo /motion_state
+ ros2 topic echo /motion_confidence
+
+Expected behavior
+ No motion → None + Low/Medium confidence
+ Only one sensor triggers → PIR_only or RCWL_only
+ Both sensors trigger → Both + High confidence
+
+Success = clean, responsive publications that correctly reflect the combined PIR + RCWL status.
