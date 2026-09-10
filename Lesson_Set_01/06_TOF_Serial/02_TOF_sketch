@@ -1,1 +1,62 @@
+Here’s a clean Arduino sketch for the VL53L0X ToF sensor that matches the format of the previous modules:
 
+**File:** `02_ToF_sketch.ino`
+
+/*
+  DroidWorks U.S.A. – ToF Sensor Module
+  Lesson Set 01 | 02_ToF_sketch
+
+  VL53L0X wiring:
+    VIN → 5V (or 3.3V depending on breakout)
+    GND → GND
+    SDA → A4
+    SCL → A5
+*/
+
+#include <Wire.h>
+#include <Adafruit_VL53L0X.h>
+
+Adafruit_VL53L0X lox = Adafruit_VL53L0X();
+
+void setup() {
+  Serial.begin(115200);
+  
+  // Wait for serial to be ready
+  while (!Serial) {
+    delay(1);
+  }
+
+  // Initialize I2C and the sensor
+  if (!lox.begin()) {
+    Serial.println(F("tof:error - Failed to boot VL53L0X"));
+    while (1);   // Halt if sensor not found
+  }
+
+  // Optional: set continuous mode for faster updates
+  lox.startRangeContinuous();
+}
+
+void loop() {
+  VL53L0X_RangingMeasurementData_t measure;
+  
+  lox.rangingTest(&measure, false);  // false = no debug output
+
+  if (measure.RangeStatus != 4) {    // 4 = out of range
+    // Valid reading – print in the expected format
+    Serial.print("tof:");
+    Serial.println(measure.RangeMilliMeter);
+  } else {
+    // Out of range or invalid
+    Serial.println("tof:0");
+  }
+
+  delay(50);   // ~20 Hz – good balance for ROS
+}
+
+### Notes
+- Requires the **Adafruit VL53L0X** library (install via Library Manager in the Arduino IDE).
+- Output format is exactly `tof:XXX` (distance in millimeters) so the ROS entry node can parse it cleanly.
+- Prints `tof:0` when the reading is out of range or invalid.
+- Continuous ranging mode is used for smoother updates.
+
+Upload this sketch and test it in the Serial Monitor before moving on to the entry node.
