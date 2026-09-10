@@ -24,7 +24,7 @@
 - Open the Serial Monitor (115200 baud)  
 - Wave your hand in front of the PIR  
 - You should see lines appear only when the state changes:  
-  `MOTION:1` or `MOTION:0`  
+  `pir:1` or `pir:0`  
 - The onboard LED (pin 13) should also turn on/off with motion  
 
 ### Create the Entry Node
@@ -46,4 +46,4 @@
 - Trigger the PIR  
 - You should see `data: true` and `data: false` published when motion is detected or cleared  
 
-Success = clean `MOTION:0/1` serial output from the Nano **and** matching Boolean messages on `/pir_state`.
+Success = clean `pir:0/1` serial output from the Nano **and** matching Boolean messages on `/pir_state`.
