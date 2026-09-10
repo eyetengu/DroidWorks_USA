@@ -1,1 +1,40 @@
+DroidWorks U.S.A. – State Distance Module
 
+Lesson Set 01 | 01_State_Distance
+Bill of Materials
+
+Working sensorfusion_distance node
+Ubuntu (Linux)
+ROS 2 Jazzy
+Existing droidworks_sensors package
+
+Purpose
+This module watches the fused distance over time and extracts higher-level distance state information:
+
+Current trend: Increasing / Decreasing / Stable
+Combined situational state (optional)
+
+It turns raw ranging data into something a behavior or OLED display can act on more intelligently.
+Create the Node
+
+Place the node file 05_State_Distance into the package
+Add the entry point in setup.py:
+'state_distance = droidworks_sensors.state_distance:main',
+
+BSR (Build / Source / Run)
+ cd ~/droidworks_ws
+ colcon build --packages-select droidworks_sensors
+ source install/setup.bash
+ ros2 run droidworks_sensors state_distance
+
+Verify Results
+ ros2 topic echo /distance_trend
+ ros2 topic echo /distance_state
+
+Expected behavior
+ Move an object slowly toward the sensors → Decreasing
+ Move it away → Increasing
+ Hold it still → Stable
+ The combined state should reflect both the trend and the current personal-space zone
+
+Success = clean, responsive publications that correctly describe whether the object is approaching, receding, or stationary.
