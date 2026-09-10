@@ -1,1 +1,24 @@
+from launch import LaunchDescription
+from launch_ros.actions import Node
 
+def generate_launch_description():
+    return LaunchDescription([
+        Node(
+            package='droidworks_sensors',
+            executable='pir_entry',
+            name='pir_entry',
+            output='screen'
+        ),
+        Node(
+            package='droidworks_sensors',
+            executable='rcwl_entry',
+            name='rcwl_entry',
+            output='screen'
+        ),
+        Node(
+            package='droidworks_sensors',
+            executable='motion_fusion',
+            name='motion_fusion',
+            output='screen'
+        ),
+    ])
