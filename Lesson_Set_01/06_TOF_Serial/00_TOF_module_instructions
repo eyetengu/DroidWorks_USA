@@ -1,1 +1,50 @@
+**DroidWorks U.S.A. – ToF Sensor Module**  
+**Lesson Set 01 | 01_ToF_Serial**
 
+### Bill of Materials
+- Arduino Nano  
+- (optional) terminal socket for Nano  
+- VL53L0X Time-of-Flight sensor (or compatible breakout)  
+- 4 jumper wires  
+- Arduino IDE  
+- Ubuntu (Linux)  
+- ROS 2 Jazzy  
+
+### Create the Module
+- Connect VL53L0X VIN → Nano 5V (or 3.3V if your breakout requires it)  
+- Connect VL53L0X GND → Nano GND  
+- Connect VL53L0X SDA → Nano A4 (SDA)  
+- Connect VL53L0X SCL → Nano A5 (SCL)  
+- Verify wiring against `01_ToF_module.jpeg`
+
+### Upload the Sketch
+- Open `02_ToF_sketch` in the Arduino IDE  
+- Upload to the Nano  
+
+### Test the Sketch
+- Open the Serial Monitor (115200 baud)  
+- Point the sensor at a surface or move an object in front of it  
+- You should see continuous distance readings in millimeters, e.g.:  
+  `tof:423`  
+  `tof:187`  
+- Readings should update rapidly and change as the distance changes  
+- Values of `0` or very large numbers usually mean out-of-range or no valid reading  
+
+### Create the Entry Node
+- Place the node file `03_ToF_entryNode` into the package  
+- Add the entry point in `setup.py`:  
+  `'tof_entry = droidworks_sensors.tof_entry:main',`
+
+### BSR (Build / Source / Run)
+ cd ~/droidworks_ws
+ colcon build
+ source install/setup.bash
+ ros2 run droidworks_sensors tof_entry
+
+### Verify Results
+- In a new terminal:  
+  `ros2 topic echo /tof_distance`  
+- Move an object in front of the sensor  
+- You should see integer (or float) distance values in millimeters published continuously, matching the Serial Monitor output  
+
+**Success** = clean continuous `tof:XXX` serial output from the Nano **and** matching distance messages on `/tof_distance`.
