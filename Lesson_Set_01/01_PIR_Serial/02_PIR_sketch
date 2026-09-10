@@ -13,7 +13,7 @@ void setup() {
 
   // Establish the initial state after the PIR settles.
   lastState = digitalRead(pirPin);
-  Serial.print("pir:");
+  Serial.print("MOTION:");
   Serial.println(lastState);
 }
 
@@ -23,7 +23,7 @@ void loop() {
   if (currentState != lastState) {
     digitalWrite(ledPin, currentState);
 
-    Serial.print("pir:");
+    Serial.print("MOTION:");
     Serial.println(currentState);
 
     lastState = currentState;
