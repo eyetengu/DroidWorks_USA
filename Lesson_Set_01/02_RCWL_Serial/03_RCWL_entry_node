@@ -1,47 +1,88 @@
-/*
-  Lesson 2 – RCWL-0516 + Arduino Nano
-  Serial output designed for a ROS2 node
+#!/usr/bin/env python3
 
-  Format:
-    motion:1   → Motion detected
-    motion:0   → No motion
-*/
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import Bool
+import serial
+import threading
 
-const int motionPin = 2;      // RCWL OUT → D2
-const int ledPin = 13;        // Built-in LED
+class RcwlMotionNode(Node):
+    def __init__(self):
+        super().__init__('rcwl_motion_node')
 
-int currentState = 0;
-int previousState = 0;
+        # --- Parameters (you can change these later with ros2 param) ---
+        self.declare_parameter('port', '/dev/ttyUSB0')      # Change if needed
+        self.declare_parameter('baudrate', 9600)
+        self.declare_parameter('topic_name', 'motion')
 
-void setup() {
-  pinMode(motionPin, INPUT);
-  pinMode(ledPin, OUTPUT);
-  
-  Serial.begin(9600);
-  
-  // Optional: send a ready message once
-  Serial.println("rcwl_ready");
-  
-  previousState = digitalRead(motionPin);
-}
+        port = self.get_parameter('port').get_parameter_value().string_value
+        baudrate = self.get_parameter('baudrate').get_parameter_value().integer_value
+        topic_name = self.get_parameter('topic_name').get_parameter_value().string_value
 
-void loop() {
-  currentState = digitalRead(motionPin);
+        # Publisher
+        self.publisher_ = self.create_publisher(Bool, topic_name, 10)
 
-  // Only publish when the state changes
-  if (currentState != previousState) {
-    
-    if (currentState == HIGH) {
-      digitalWrite(ledPin, HIGH);
-      Serial.println("motion:1");      // Motion detected
-    } 
-    else {
-      digitalWrite(ledPin, LOW);
-      Serial.println("motion:0");      // No motion
-    }
-    
-    previousState = currentState;
-  }
+        # Open serial port
+        try:
+            self.ser = serial.Serial(port, baudrate, timeout=1)
+            self.get_logger().info(f'Connected to {port} at {baudrate} baud')
+        except serial.SerialException as e:
+            self.get_logger().error(f'Failed to open serial port: {e}')
+            raise
 
-  delay(20);   // Small debounce / stability delay
-}
+        # Start a background thread to read serial
+        self.running = True
+        self.thread = threading.Thread(target=self.serial_reader)
+        self.thread.daemon = True
+        self.thread.start()
+
+        self.get_logger().info('RCWL Motion Node started. Publishing on /motion')
+
+    def serial_reader(self):
+        while self.running and rclpy.ok():
+            try:
+                line = self.ser.readline().decode('utf-8').strip()
+                if not line:
+                    continue
+
+                # Parse messages coming from Arduino
+                if line == "motion:1":
+                    msg = Bool()
+                    msg.data = True
+                    self.publisher_.publish(msg)
+                    self.get_logger().info('Motion detected → published True')
+
+                elif line == "motion:0":
+                    msg = Bool()
+                    msg.data = False
+                    self.publisher_.publish(msg)
+                    self.get_logger().info('No motion → published False')
+
+                elif line == "rcwl_ready":
+                    self.get_logger().info('Arduino is ready')
+
+            except Exception as e:
+                self.get_logger().error(f'Serial read error: {e}')
+                break
+
+    def destroy_node(self):
+        self.running = False
+        if hasattr(self, 'ser') and self.ser.is_open:
+            self.ser.close()
+        super().destroy_node()
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = RcwlMotionNode()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
