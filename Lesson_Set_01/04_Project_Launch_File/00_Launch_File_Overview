@@ -10,15 +10,12 @@ This launch file starts the three current motion-related nodes together:
 ### Create the Launch File
 Create a folder named `launch` inside the package if it does not already exist:
 
-```bash
 mkdir -p ~/droidworks_ws/src/droidworks_sensors/launch
-```
 
 Create the file:
 
 `motion_sensors.launch.py`
 
-```python
 from launch import LaunchDescription
 from launch_ros.actions import Node
 
@@ -43,7 +40,6 @@ def generate_launch_description():
             output='screen'
         ),
     ])
-```
 
 ### Add Launch Support
 Make sure `setup.py` includes the launch files.  
