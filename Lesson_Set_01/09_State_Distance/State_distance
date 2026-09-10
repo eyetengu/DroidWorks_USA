@@ -1,1 +1,102 @@
+#!/usr/bin/env python3
+"""
+DroidWorks U.S.A. – State Distance Module
+Lesson Set 01 | 05_State_Distance
 
+Subscribes to:
+  /fused_distance   (Float32, mm)
+  /personal_space   (String)
+
+Publishes:
+  /distance_trend   (String: Increasing / Decreasing / Stable)
+  /distance_state   (String: combined human-readable state)
+"""
+
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import Float32, String
+from collections import deque
+import time
+
+
+class StateDistance(Node):
+    def __init__(self):
+        super().__init__('state_distance')
+
+        # Parameters
+        self.declare_parameter('history_size', 8)          # how many samples to keep
+        self.declare_parameter('stable_threshold_mm', 25.0) # max change to still call "Stable"
+        self.declare_parameter('min_delta_mm', 15.0)        # ignore tiny noise
+
+        self.history_size = self.get_parameter('history_size').value
+        self.stable_threshold = self.get_parameter('stable_threshold_mm').value
+        self.min_delta = self.get_parameter('min_delta_mm').value
+
+        # History of recent distances
+        self.distance_history = deque(maxlen=self.history_size)
+        self.last_space = "Infinite"
+
+        # Publishers
+        self.pub_trend = self.create_publisher(String, 'distance_trend', 10)
+        self.pub_state = self.create_publisher(String, 'distance_state', 10)
+
+        # Subscribers
+        self.create_subscription(Float32, 'fused_distance', self.distance_callback, 10)
+        self.create_subscription(String, 'personal_space', self.space_callback, 10)
+
+        # Timer for steady evaluation
+        self.create_timer(0.1, self.evaluate)  # 10 Hz
+
+        self.get_logger().info('State Distance node started')
+
+    def distance_callback(self, msg: Float32):
+        self.distance_history.append(msg.data)
+
+    def space_callback(self, msg: String):
+        self.last_space = msg.data
+
+    def evaluate(self):
+        if len(self.distance_history) < self.history_size:
+            return  # not enough data yet
+
+        oldest = self.distance_history[0]
+        newest = self.distance_history[-1]
+        delta = newest - oldest
+
+        # Determine trend
+        if abs(delta) < self.stable_threshold:
+            trend = "Stable"
+        elif delta < -self.min_delta:
+            trend = "Decreasing"   # object getting closer
+        elif delta > self.min_delta:
+            trend = "Increasing"   # object moving away
+        else:
+            trend = "Stable"
+
+        # Publish trend
+        trend_msg = String()
+        trend_msg.data = trend
+        self.pub_trend.publish(trend_msg)
+
+        # Build a combined human-readable state
+        state = f"{self.last_space} + {trend}"
+
+        state_msg = String()
+        state_msg.data = state
+        self.pub_state.publish(state_msg)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = StateDistance()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
