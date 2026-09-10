@@ -1,1 +1,90 @@
+#!/usr/bin/env python3
+"""
+DroidWorks U.S.A. — Motion Fusion Node
+Lesson Set 01
 
+Subscribes to:
+  /pir_state   (std_msgs/Bool)
+  /rcwl_state  (std_msgs/Bool)
+
+Publishes:
+  /fused_motion  (std_msgs/String)
+
+Output format:
+  pir:0, rcwl:0
+  pir:1, rcwl:0
+  pir:0, rcwl:1
+  pir:1, rcwl:1
+"""
+
+import rclpy
+from rclpy.node import Node
+
+from std_msgs.msg import Bool, String
+
+
+class MotionFusionNode(Node):
+
+    def __init__(self):
+        super().__init__('motion_fusion')
+
+        self.pir_state = False
+        self.rcwl_state = False
+
+        self.subscription_pir = self.create_subscription(
+            Bool,
+            '/pir_state',
+            self.pir_callback,
+            10
+        )
+
+        self.subscription_rcwl = self.create_subscription(
+            Bool,
+            '/rcwl_state',
+            self.rcwl_callback,
+            10
+        )
+
+        self.publisher_ = self.create_publisher(
+            String,
+            '/fused_motion',
+            10
+        )
+
+        self.get_logger().info('Motion Fusion node started')
+
+    def pir_callback(self, msg: Bool):
+        self.pir_state = msg.data
+        self.publish_fused()
+
+    def rcwl_callback(self, msg: Bool):
+        self.rcwl_state = msg.data
+        self.publish_fused()
+
+    def publish_fused(self):
+        pir_val = 1 if self.pir_state else 0
+        rcwl_val = 1 if self.rcwl_state else 0
+
+        msg = String()
+        msg.data = f'pir:{pir_val}, rcwl:{rcwl_val}'
+
+        self.publisher_.publish(msg)
+        self.get_logger().info(f'Published /fused_motion = {msg.data}')
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = MotionFusionNode()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.get_logger().info('Shutting down Motion Fusion node')
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
