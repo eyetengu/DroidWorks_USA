@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""
+DroidWorks U.S.A. – Sensor Fusion Distance Module
+Lesson Set 01 | 04_SensorFusion_Distance
+
+Subscribes to:
+  /ultrasonic_distance  (Float32, cm)
+  /tof_distance         (Int32, mm)
+
+Publishes:
+  /fused_distance       (Float32, mm)
+  /sensor_confidence    (String: High / Medium / Low)
+  /personal_space       (String: Infinite / Limited / Dangerous)
+"""
+
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import Float32, Int32, String
+import math
+
+
+class SensorFusionDistance(Node):
+    def __init__(self):
+        super().__init__('sensorfusion_distance')
+
+        # ----- Parameters (easy to tune later) -----
+        self.declare_parameter('far_threshold_mm', 1200.0)      # > this = Infinite
+        self.declare_parameter('close_threshold_mm', 350.0)     # < this = Dangerous
+        self.declare_parameter('agreement_tolerance_mm', 80.0)  # how close the two sensors must be to "agree"
+
+        self.far_threshold = self.get_parameter('far_threshold_mm').value
+        self.close_threshold = self.get_parameter('close_threshold_mm').value
+        self.agreement_tolerance = self.get_parameter('agreement_tolerance_mm').value
+
+        # Latest sensor readings (None = no data yet)
+        self.us_mm = None
+        self.tof_mm = None
+
+        # Publishers
+        self.pub_fused = self.create_publisher(Float32, 'fused_distance', 10)
+        self.pub_confidence = self.create_publisher(String, 'sensor_confidence', 10)
+        self.pub_space = self.create_publisher(String, 'personal_space', 10)
+
+        # Subscribers
+        self.create_subscription(Float32, 'ultrasonic_distance', self.us_callback, 10)
+        self.create_subscription(Int32, 'tof_distance', self.tof_callback, 10)
+
+        # Timer to run fusion at a steady rate
+        self.create_timer(0.05, self.fuse)   # 20 Hz
+
+        self.get_logger().info('Sensor Fusion Distance node started')
+
+    def us_callback(self, msg: Float32):
+        # Convert cm → mm
+        self.us_mm = msg.data * 10.0
+
+    def tof_callback(self, msg: Int32):
+        self.tof_mm = float(msg.data)
+
+    def fuse(self):
+        # Wait until we have at least one valid reading
+        if self.us_mm is None and self.tof_mm is None:
+            return
+
+        # ----- 1. Choose / fuse the distance -----
+        if self.us_mm is not None and self.tof_mm is not None:
+            diff = abs(self.us_mm - self.tof_mm)
+
+            if diff <= self.agreement_tolerance:
+                # Sensors agree → average them
+                fused = (self.us_mm + self.tof_mm) / 2.0
+                confidence = "High"
+            else:
+                # Sensors disagree → prefer ToF (usually more precise at short range)
+                # but mark lower confidence
+                fused = self.tof_mm
+                confidence = "Medium" if diff < self.agreement_tolerance * 2.5 else "Low"
+        elif self.tof_mm is not None:
+            fused = self.tof_mm
+            confidence = "Medium"
+        else:
+            fused = self.us_mm
+            confidence = "Medium"
+
+        # ----- 2. Personal space logic -----
+        if fused > self.far_threshold or fused <= 0.0:
+            space = "Infinite"
+        elif fused < self.close_threshold:
+            space = "Dangerous"
+        else:
+            space = "Limited"
+
+        # ----- 3. Publish everything -----
+        fused_msg = Float32()
+        fused_msg.data = fused
+        self.pub_fused.publish(fused_msg)
+
+        conf_msg = String()
+        conf_msg.data = confidence
+        self.pub_confidence.publish(conf_msg)
+
+        space_msg = String()
+        space_msg.data = space
+        self.pub_space.publish(space_msg)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = SensorFusionDistance()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
