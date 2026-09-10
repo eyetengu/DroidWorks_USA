@@ -1,1 +1,49 @@
+**DroidWorks U.S.A. – Sensor Fusion Distance Module**  
+**Lesson Set 01 | 01_SensorFusion_Distance**
 
+### Bill of Materials
+- Arduino Nano(s) already running Ultrasonic + ToF sketches  
+- Working `ultrasonic_entry` and `tof_entry` nodes  
+- Ubuntu (Linux)  
+- ROS 2 Jazzy  
+- Existing `droidworks_sensors` package  
+
+### Purpose
+This module fuses the two ranging sensors (Ultrasonic + ToF) into higher-level information:
+
+- Best-estimate distance  
+- Sensor agreement / confidence  
+- Personal-space state (`Infinite` / `Limited` / `Dangerous`)
+
+### Create the Fusion Node
+- Place the node file `04_SensorFusion_Distance` into the package  
+- Add the entry point in `setup.py`:  
+  `'sensorfusion_distance = droidworks_sensors.sensorfusion_distance:main',`
+
+### BSR (Build / Source / Run)
+ cd ~/droidworks_ws
+ colcon build --packages-select droidworks_sensors
+ source install/setup.bash
+ ros2 run droidworks_sensors sensorfusion_distance
+
+### Verify Results
+In separate terminals you can inspect the outputs:
+
+# Fused distance (best estimate in mm)
+ ros2 topic echo /fused_distance
+
+# Confidence level (High / Medium / Low)
+ ros2 topic echo /sensor_confidence
+
+# Personal space state
+ ros2 topic echo /personal_space
+
+**Expected behavior**
+- When both sensors agree → High confidence + stable fused distance  
+- When they disagree significantly → Medium or Low confidence  
+- Personal space transitions cleanly:  
+  - `Infinite` → nothing in range  
+  - `Limited` → object present at a safe distance  
+  - `Dangerous` → object too close  
+
+**Success** = clean, continuous publications on all three topics that correctly reflect the real-world situation in front of the sensors.
