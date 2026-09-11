@@ -23,7 +23,7 @@ void loop() {
   if (currentState != lastState) {
     digitalWrite(ledPin, currentState);
 
-    Serial.print("MOTION:");
+    Serial.print("pir:");
     Serial.println(currentState);
 
     lastState = currentState;
