@@ -13,7 +13,7 @@ class RcwlMotionNode(Node):
         # --- Parameters (you can change these later with ros2 param) ---
         self.declare_parameter('port', '/dev/ttyUSB1')      # Change if needed
         self.declare_parameter('baudrate', 9600)
-        self.declare_parameter('topic_name', 'rcwl')
+        self.declare_parameter('topic_name', 'rcwl_state')
 
         port = self.get_parameter('port').get_parameter_value().string_value
         baudrate = self.get_parameter('baudrate').get_parameter_value().integer_value
