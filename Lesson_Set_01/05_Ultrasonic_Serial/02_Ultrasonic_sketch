@@ -31,10 +31,12 @@ void loop() {
   long duration = pulseIn(echoPin, HIGH, 30000);
 
   float distance_cm = 0.0;
+  float distance_in = 0.0;
 
   if (duration > 0) {
     // Speed of sound ≈ 0.0343 cm/µs, divide by 2 for round trip
     distance_cm = (duration * 0.0343) / 2.0;
+    distance_in = distance_cm/2.54;
   }
 
   // Print in the exact format expected by the entry node
