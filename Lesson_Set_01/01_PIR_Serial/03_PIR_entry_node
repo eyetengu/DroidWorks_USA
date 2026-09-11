@@ -94,7 +94,7 @@ class ODLNode(Node):
             self.ser = None
 
     def _handle_line(self, line: str):
-        if line.startswith('MOTION:'):
+        if line.startswith('pir:'):
             try:
                 value = int(
                     line.split(':', 1)[1]
