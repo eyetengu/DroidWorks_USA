@@ -1,1 +1,93 @@
+**Lesson Set 02 – Overview**  
+**Giving the Robot a Face and the Human a Window**
 
+---
+
+### Core Goal
+
+Lesson Set 01 taught the robot to **understand** its immediate surroundings.  
+Lesson Set 02 teaches it to **show** that understanding.
+
+We will create two complementary display modules:
+
+1. **On-board OLED (Serial)**  
+   A display physically attached to the robot.  
+   Low latency, no network required, always available.
+
+2. **Remote OLED (MQTT)**  
+   The same information delivered wirelessly.  
+   Allows a human to monitor the robot from a distance or from another device.
+
+Both modules will support **two switchable views** (changed by a button press):
+
+- **Debug View** → Shows the clear situational summary (`/situational_summary`)
+- **Expression View** → Shows a simple face / emotional state driven by `/expression_hint`
+
+---
+
+### What We Want the Student to Learn
+
+- How to take high-level ROS state and render it on a small display
+- The difference between tightly coupled (Serial) and loosely coupled (MQTT) communication
+- How to design a simple dual-mode user interface on a constrained device
+- How a clean architecture (the Combined State from Lesson 01) makes the display layer simple
+
+---
+
+### High-Level Architecture
+
+```
+Lesson Set 01
+      │
+      ▼
+Combined State Node
+  ├── /situational_state
+  ├── /situational_summary
+  └── /expression_hint
+      │
+      ├─────────────────────────────┐
+      ▼                             ▼
+Serial OLED Module          MQTT OLED Module
+(on-robot display)          (remote display)
+```
+
+Because Lesson Set 01 already ends with clean, meaningful topics, the OLED modules do **not** need to know anything about PIRs, ToF error codes, or fusion math. They only consume the final situational outputs.
+
+---
+
+### Module Structure (Planned)
+
+**Module A – Serial OLED**
+- Hardware: OLED (SSD1306) + button + Arduino/ESP connected via serial (or directly on the same bus)
+- Sketch: Receives formatted state over serial and renders either Debug or Expression view
+- ROS side: Small node (or extension) that sends the Combined State over serial in a simple text protocol
+
+**Module B – MQTT OLED**
+- Hardware: OLED + button + WiFi-capable board (ESP32 recommended)
+- Sketch: Subscribes to MQTT topics and renders the same two views
+- Requires a lightweight MQTT broker (Mosquitto)
+- Demonstrates networked, multi-device capability
+
+---
+
+### Success Criteria for Lesson Set 02
+
+- Both displays can show the current situational state
+- A button cleanly switches between Debug view and Expression view
+- The Expression view changes in a way that feels responsive to the real world (Alert when something is too close, Calm when the space is empty, etc.)
+- The Serial version works without any network
+- The MQTT version works over the network and can be viewed remotely
+- Students understand *why* both approaches are useful
+
+---
+
+### Design Philosophy
+
+Keep the display layer thin.  
+All the hard interpretive work was finished in Lesson Set 01.  
+Lesson Set 02 should feel like a rewarding and relatively approachable payoff:  
+“Now that the robot understands the world, let’s let it show us what it sees.”
+
+---
+
+Would you like to start refining the detailed requirements next (exact hardware choices, message format for the displays, button behavior, etc.), or shall we first decide on the preferred hardware for each of the two OLED modules?
