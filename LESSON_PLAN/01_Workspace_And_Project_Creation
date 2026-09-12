@@ -1,1 +1,67 @@
+This document creates the ROS2 workspace and Python package that the rest of Lesson Set 01 (and later sets) will use.
 
+1. Create the workspace
+ mkdir -p ~/droidworks_ws/src
+ cd ~/droidworks_ws
+
+2. Create the Python package
+From inside the src folder:
+ cd ~/droidworks_ws/src
+ ros2 pkg create --build-type ament_python droidworks_sensors
+This creates a package named droidworks_sensors.
+
+All Lesson Set 01 nodes will live inside this package for now.
+
+3. Basic package layout
+After creation you should have something like this:
+ droidworks_sensors/
+ ├── droidworks_sensors/
+ │   └── __init__.py
+ ├── package.xml
+ ├── resource/
+ │   └── droidworks_sensors
+ ├── setup.cfg
+ ├── setup.py
+ └── test/
+
+4. Key files you will edit
+package.xml
+ Update description, maintainer, and license if desired.
+ Make sure these dependencies are present (add them if missing):
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+
+setup.py
+  This is where you will register every node as an entry point.
+  You will add lines like this later:
+    entry_points={
+        'console_scripts': [
+            'pir_entry = droidworks_sensors.pir_entry:main',
+            'rcwl_entry = droidworks_sensors.rcwl_entry:main',
+            # more nodes will be added here
+        ],
+    },
+
+setup.cfg
+ Usually needs no changes for our purposes.
+
+5. First build and source
+ From the workspace root:
+  cd ~/droidworks_ws
+  colcon build
+  source install/setup.bash
+
+You should now be able to run:
+ ros2 pkg list | grep droidworks
+and see droidworks_sensors.
+
+Notes
+ Keep the package name droidworks_sensors for the entire Lesson Set 01.
+ We will place individual node files inside droidworks_sensors/droidworks_sensors/.
+ Every time you add a new node, you must:
+  Create the .py file
+  Add the entry point in setup.py
+  Run colcon build
+  Source again
+
+This workspace and package are the foundation.
