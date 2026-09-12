@@ -1,1 +1,57 @@
+**DroidWorks U.S.A. – Combined State Module**  
+**Lesson Set 01 | 01_Combined_State**
 
+### Bill of Materials
+- Working `sensorfusion_motion` and `state_motion` nodes  
+- Working `sensorfusion_distance` node (with distance matrix + proximity)  
+- Ubuntu (Linux)  
+- ROS 2 Jazzy  
+- Existing `droidworks_sensors` package  
+
+### Purpose
+This is the final integration node of Lesson Set 01.  
+It takes the compact high-level signals from the motion and distance pipelines and produces a single, clean **situational state** that is ready for display or higher-level behavior.
+
+**Inputs it uses:**
+- Motion state
+- Distance matrix
+- Proximity
+- Confidence
+
+**Outputs it provides:**
+- `/situational_state` – compact coded form (easy for machines)
+- `/situational_summary` – clear human-readable description (ideal for debug OLED)
+- `/expression_hint` – simple status/emotion hint (ideal for face OLED)
+
+### Create the Node
+- Place the node file `08_Combined_State` into the package  
+- Add the entry point in `setup.py`:  
+  `'combined_state = droidworks_sensors.combined_state:main',`
+
+### BSR (Build / Source / Run)
+```bash
+cd ~/droidworks_ws
+colcon build --packages-select droidworks_sensors
+source install/setup.bash
+ros2 run droidworks_sensors combined_state
+```
+
+### Verify Results
+In separate terminals:
+
+```bash
+ros2 topic echo /situational_state
+ros2 topic echo /situational_summary
+ros2 topic echo /expression_hint
+```
+
+**Expected behavior examples**
+- Quiet environment → `0,1,0,High` and summary showing no motion + Far + Agree  
+- Person approaching closely → higher motion ID + TooClose + matching expression hint (`Alert`, `Curious`, etc.)
+
+### Success Criteria
+- All three topics publish continuously and update when the real-world situation changes  
+- The compact code, human summary, and expression hint stay consistent with each other  
+- The node runs cleanly alongside the rest of the Lesson Set 01 launch file  
+
+**Success** = the robot now reports a clear, unified understanding of its immediate surroundings.
