@@ -1,0 +1,55 @@
+Basic Sensors (Individual)
+
+Topic List
+ /pir_state
+ /rcwl_state
+ /fused_motion
+
+This is the foundation set.
+In Lesson Set 01 you will build and test the individual sensors one at a time, turn their raw output into clean ROS2 topics, fuse the related sensors, and create simple state nodes that the rest of the system can listen to.
+By the end of this set you will have:
+-Working sketches and ROS2 nodes for each sensor
+-A motion fusion node that combines PIR and RCWL
+-A distance fusion node that combines Ultrasonic and Time-of-Flight
+-Separate state nodes for motion and distance
+
+These state nodes are what the OLED (Lesson Set 02) and future modules will subscribe to. That is why we keep them simple and stable.
+What is inside this set
+
+PIR Sensor Module
+-mcu/sensor module + Sketch + ROS2 node. Digital motion detection.
+
+RCWL Sensor Module
+-mcu/sensor module + Sketch + ROS2 node. Microwave motion detection.
+
+Motion Fusion Node
+-Combines PIR and RCWL into a single, more reliable motion signal.
+
+Ultrasonic Sensor Module
+-mcu/sensor module + Sketch + ROS2 node. Classic distance measurement.
+
+Time-of-Flight (ToF) Sensor Module
+-mcu/sensor module + Sketch + ROS2 node. More precise distance measurement.
+
+Distance Fusion Node
+-Combines Ultrasonic and ToF into a cleaner distance value.
+
+State Nodes
+-Motion State Node
+-Distance State Node
+These take the fused data and publish simple, usable states that higher-level modules can act on.
+
+How to work through this set
+-Do the modules in order.
+-Each one has its own plain text document with wiring, code, and expected results.
+-Get each sensor working by itself before you move to fusion.
+-Get the fusion nodes working before you move to the state nodes.
+
+When you finish Lesson Set 01, you will have a solid, modular sensor layer.
+
+Lesson Set 02 (OLED) will simply listen to the state nodes you create here.
+
+Lesson Set 03 (sensor arrays) will replace the individual sensors without forcing you to rewrite the display or the state logic.
+That is the design on purpose.
+
+Start with the PIR module when you are ready.
