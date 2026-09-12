@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""
+DroidWorks U.S.A. – OLED MQTT Bridge
+Lesson Set 02
+
+Subscribes to Combined State topics and republishes them over MQTT
+so an ESP32 + OLED can display the information remotely.
+"""
+
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+import paho.mqtt.client as mqtt
+import time
+
+
+class OledMqtt(Node):
+    def __init__(self):
+        super().__init__('oled_mqtt')
+
+        # ---------- MQTT settings ----------
+        self.declare_parameter('mqtt_broker', 'localhost')
+        self.declare_parameter('mqtt_port', 1883)
+        self.declare_parameter('mqtt_base_topic', 'droidworks/oled')
+
+        self.broker = self.get_parameter('mqtt_broker').value
+        self.port = self.get_parameter('mqtt_port').value
+        self.base_topic = self.get_parameter('mqtt_base_topic').value
+
+        # Full topics that the ESP32 will subscribe to
+        self.topic_summary = f'{self.base_topic}/summary'
+        self.topic_expression = f'{self.base_topic}/expression'
+
+        # ---------- MQTT client ----------
+        self.client = mqtt.Client()
+        self.client.on_connect = self.on_connect
+        self.client.on_disconnect = self.on_disconnect
+
+        self.connected = False
+        self.connect_mqtt()
+
+        # ---------- ROS subscriptions ----------
+        self.create_subscription(String, 'situational_summary', self.summary_callback, 10)
+        self.create_subscription(String, 'expression_hint', self.expression_callback, 10)
+
+        # Keepalive timer
+        self.create_timer(1.0, self.keepalive)
+
+        self.get_logger().info('OLED MQTT bridge started')
+        self.get_logger().info(f'Publishing to MQTT topics:')
+        self.get_logger().info(f'  {self.topic_summary}')
+        self.get_logger().info(f'  {self.topic_expression}')
+
+    def connect_mqtt(self):
+        try:
+            self.client.connect(self.broker, self.port, keepalive=60)
+            self.client.loop_start()
+        except Exception as e:
+            self.get_logger().error(f'Failed to connect to MQTT broker: {e}')
+
+    def on_connect(self, client, userdata, flags, rc):
+        if rc == 0:
+            self.connected = True
+            self.get_logger().info('Connected to MQTT broker')
+        else:
+            self.connected = False
+            self.get_logger().error(f'MQTT connect failed with code {rc}')
+
+    def on_disconnect(self, client, userdata, rc):
+        self.connected = False
+        self.get_logger().warn('Disconnected from MQTT broker')
+
+    def keepalive(self):
+        if not self.connected:
+            self.get_logger().warn('MQTT not connected – attempting reconnect...')
+            self.connect_mqtt()
+
+    def summary_callback(self, msg: String):
+        if self.connected:
+            result = self.client.publish(self.topic_summary, msg.data, qos=0)
+            if result.rc != mqtt.MQTT_ERR_SUCCESS:
+                self.get_logger().warn('Failed to publish summary')
+
+    def expression_callback(self, msg: String):
+        if self.connected:
+            result = self.client.publish(self.topic_expression, msg.data, qos=0)
+            if result.rc != mqtt.MQTT_ERR_SUCCESS:
+                self.get_logger().warn('Failed to publish expression')
+
+    def destroy_node(self):
+        self.client.loop_stop()
+        self.client.disconnect()
+        super().destroy_node()
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = OledMqtt()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
