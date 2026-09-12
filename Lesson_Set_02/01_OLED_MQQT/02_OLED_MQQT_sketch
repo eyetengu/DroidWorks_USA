@@ -1,1 +1,190 @@
+/*
+  DroidWorks U.S.A. – OLED MQTT Display (ESP32)
+  Lesson Set 02
 
+  Hardware:
+    - ESP32
+    - SSD1306 OLED (128x64) on I2C
+      SDA → GPIO 21
+      SCL → GPIO 22
+    - Button on GPIO 0 (BOOT button works) or change as needed
+*/
+
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// ---------- User settings ----------
+const char* ssid         = "xxxxxxxx";
+const char* password     = "xxxxxxxx";
+const char* mqtt_server  = "192.168.x.xxx";   // ← IP of your Raspberry Pi
+const int   mqtt_port    = 1883;
+
+const char* topic_summary    = "droidworks/oled/summary";
+const char* topic_expression = "droidworks/oled/expression";
+
+// ---------- OLED ----------
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET   -1
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// ---------- Button ----------
+const int buttonPin = 0;          // BOOT button on most ESP32 boards
+bool lastButtonState = HIGH;
+unsigned long lastDebounce = 0;
+const unsigned long debounceDelay = 50;
+
+// ---------- State ----------
+String currentSummary = "Waiting for data...";
+String currentExpression = "None";
+bool showDebug = true;            // true = Debug view, false = Expression view
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+// ---------- WiFi ----------
+void setup_wifi() {
+  delay(10);
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi connected");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+// ---------- MQTT Callback ----------
+void callback(char* topic, byte* payload, unsigned int length) {
+  String message;
+  for (unsigned int i = 0; i < length; i++) {
+    message += (char)payload[i];
+  }
+
+  if (String(topic) == topic_summary) {
+    currentSummary = message;
+  }
+  else if (String(topic) == topic_expression) {
+    currentExpression = message;
+  }
+
+  updateDisplay();
+}
+
+// ---------- Reconnect ----------
+void reconnect() {
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    if (client.connect("DroidWorks_OLED_ESP32")) {
+      Serial.println("connected");
+      client.subscribe(topic_summary);
+      client.subscribe(topic_expression);
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 3 seconds");
+      delay(3000);
+    }
+  }
+}
+
+// ---------- Display ----------
+void updateDisplay() {
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+
+  if (showDebug) {
+    // Debug View – each field on its own line
+    display.setTextSize(1);
+    display.println("DEBUG VIEW");
+    display.println("----------------");
+
+    // Parse the summary string: "Motion:xxx | Dist:yyy | Prox:zzz | Conf:www"
+    String temp = currentSummary;
+    
+    // Extract and print each part
+    int idx = 0;
+    while (idx >= 0 && temp.length() > 0) {
+      idx = temp.indexOf(" | ");
+      String part;
+      if (idx >= 0) {
+        part = temp.substring(0, idx);
+        temp = temp.substring(idx + 3);
+      } else {
+        part = temp;
+        temp = "";
+      }
+      display.println(part);
+    }
+  } else {
+    // Expression View
+    display.setTextSize(1);
+    display.println("EXPRESSION");
+    display.println("----------------");
+    display.setTextSize(2);
+    display.println();
+    display.println(currentExpression);
+  }
+
+  display.display();
+}
+
+// ---------- Setup ----------
+void setup() {
+  Serial.begin(115200);
+  pinMode(buttonPin, INPUT_PULLUP);
+
+  // I2C on pins 21 (SDA) and 22 (SCL)
+  Wire.begin(21, 22);
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    for (;;);
+  }
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println("DroidWorks OLED");
+  display.println("Connecting...");
+  display.display();
+
+  setup_wifi();
+  client.setServer(mqtt_server, mqtt_port);
+  client.setCallback(callback);
+
+  updateDisplay();
+}
+
+// ---------- Loop ----------
+void loop() {
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
+
+  // Button handling (toggle view)
+  int reading = digitalRead(buttonPin);
+  if (reading != lastButtonState) {
+    lastDebounce = millis();
+  }
+
+  if ((millis() - lastDebounce) > debounceDelay) {
+    if (reading == LOW) {           // button pressed
+      showDebug = !showDebug;
+      updateDisplay();
+      delay(300);                   // simple lockout
+    }
+  }
+  lastButtonState = reading;
+}
