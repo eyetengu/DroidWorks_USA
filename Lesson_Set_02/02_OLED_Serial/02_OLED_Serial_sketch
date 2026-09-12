@@ -1,1 +1,139 @@
+/*
+  DroidWorks U.S.A. – OLED Serial Display (Arduino Nano)
+  Lesson Set 02
 
+  Hardware:
+    - Arduino Nano
+    - SSD1306 OLED 128x64 (I2C)
+      SDA → A4
+      SCL → A5
+    - Button → D2 (to GND, uses INPUT_PULLUP)
+*/
+
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// ---------- OLED ----------
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET   -1
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// ---------- Button ----------
+const int buttonPin = 2;
+bool lastButtonState = HIGH;
+unsigned long lastDebounce = 0;
+const unsigned long debounceDelay = 50;
+
+// ---------- State ----------
+String currentSummary = "Waiting for data...";
+String currentExpression = "None";
+bool showDebug = true;   // true = Debug view, false = Expression view
+
+// Buffer for incoming serial
+String inputBuffer = "";
+
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(buttonPin, INPUT_PULLUP);
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    for (;;);
+  }
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println("DroidWorks OLED");
+  display.println("Serial Mode");
+  display.println("Waiting...");
+  display.display();
+}
+
+void loop() {
+  // ----- Read serial -----
+  while (Serial.available()) {
+    char c = Serial.read();
+
+    if (c == '\n') {
+      processLine(inputBuffer);
+      inputBuffer = "";
+    } else if (c != '\r') {
+      inputBuffer += c;
+    }
+  }
+
+  // ----- Button handling -----
+  int reading = digitalRead(buttonPin);
+
+  if (reading != lastButtonState) {
+    lastDebounce = millis();
+  }
+
+  if ((millis() - lastDebounce) > debounceDelay) {
+    if (reading == LOW) {          // button pressed
+      showDebug = !showDebug;
+      updateDisplay();
+      delay(300);                  // simple lockout
+    }
+  }
+  lastButtonState = reading;
+}
+
+void processLine(String line) {
+  line.trim();
+
+  if (line.startsWith("SUMMARY:")) {
+    currentSummary = line.substring(8);   // remove "SUMMARY:"
+    updateDisplay();
+  }
+  else if (line.startsWith("EXPR:")) {
+    currentExpression = line.substring(5); // remove "EXPR:"
+    updateDisplay();
+  }
+}
+
+void updateDisplay() {
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+
+  if (showDebug) {
+    // Debug View – each field on its own line
+    display.setTextSize(1);
+    display.println("DEBUG VIEW");
+    display.println("----------------");
+
+    String temp = currentSummary;
+    int idx = 0;
+
+    while (temp.length() > 0) {
+      idx = temp.indexOf(" | ");
+      String part;
+
+      if (idx >= 0) {
+        part = temp.substring(0, idx);
+        temp = temp.substring(idx + 3);
+      } else {
+        part = temp;
+        temp = "";
+      }
+      display.println(part);
+    }
+  }
+  else {
+    // Expression View
+    display.setTextSize(1);
+    display.println("EXPRESSION");
+    display.println("----------------");
+    display.setTextSize(2);
+    display.println();
+    display.println(currentExpression);
+  }
+
+  display.display();
+}
