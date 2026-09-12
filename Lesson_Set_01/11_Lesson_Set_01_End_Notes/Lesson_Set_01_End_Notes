@@ -1,0 +1,147 @@
+**DroidWorks U.S.A. – Lesson Set 01 Review**  
+**From Raw Sensors to Situational Awareness**
+
+---
+
+### What We Set Out to Build
+
+Lesson Set 01 was never just about connecting individual sensors.  
+The real goal was to transform simple hardware readings into **meaningful situational awareness** that a robot (and a human) can actually use.
+
+By the end of this lesson set we have moved through four clear layers:
+
+1. **Raw Sensing**
+2. **Clean Entry**
+3. **Fusion & Interpretation**
+4. **Combined Situational State**
+
+This progression is deliberate. Each layer builds on the previous one and removes complexity from the layers above it.
+
+---
+
+### Layer 1 – Raw Sensors & Entry Nodes
+
+We began with four physical sensors:
+
+- **PIR** – detects thermal motion
+- **RCWL** – detects motion via microwave Doppler
+- **Ultrasonic (HC-SR04)** – measures distance with sound
+- **ToF (VL53L0X)** – measures distance with light
+
+Each sensor received:
+
+- A clear wiring guide
+- An Arduino sketch that outputs a simple, consistent serial format
+- A dedicated ROS 2 entry node that reads the serial stream and publishes a clean ROS topic
+
+**Key achievement at this layer:**  
+The rest of the system no longer cares about baud rates, serial ports, or sensor-specific quirks. It only sees well-named topics with consistent units (millimeters for distance).
+
+---
+
+### Layer 2 – Sensor Fusion
+
+Once the data was clean, we combined related sensors:
+
+**Motion Fusion (PIR + RCWL)**  
+Produced a 4-state matrix:
+
+| State | Meaning              |
+|-------|----------------------|
+| 0     | None                 |
+| 1     | RCWL only            |
+| 2     | PIR only             |
+| 3     | Both                 |
+
+This tells us not only *whether* something is moving, but *how the two different motion technologies agree*.
+
+**Distance Fusion (Ultrasonic + ToF)**  
+Went further than a simple average. It now publishes:
+
+- A best-estimate fused distance
+- A **Distance Matrix** that describes the *relationship* between the two sensors:
+  - Agree
+  - US closer
+  - ToF closer
+  - Invalid
+- Proximity / Personal Space (Far → Near → Too Close)
+- Confidence level (High / Medium / Low)
+
+The Distance Matrix is particularly important. It begins to answer a more interesting question than “how far?” — it starts to answer “what kind of space am I looking at?”
+
+---
+
+### Layer 3 – State Nodes
+
+The state nodes watch the fused information over time:
+
+- **State Motion** tracks whether motion is Idle, Active, or Sustained
+- **State Distance** tracks whether the fused distance is Increasing, Decreasing, or Stable
+
+These nodes turn instantaneous readings into short-term behavior.
+
+---
+
+### Layer 4 – Combined State (The Payoff)
+
+Finally, everything is brought together in the **Combined State Node**.
+
+It takes the compact signals:
+
+- Motion ID (0–3)
+- Distance Matrix ID (0–3)
+- Proximity ID (0–2)
+- Confidence
+
+…and publishes three clean outputs:
+
+| Topic                  | Purpose                              |
+|------------------------|--------------------------------------|
+| `/situational_state`   | Compact machine-readable code        |
+| `/situational_summary` | Clear human-readable description     |
+| `/expression_hint`     | Simple emotional/status hint         |
+
+This is the finished product of Lesson Set 01:  
+a single, stable, understandable description of what the robot currently perceives.
+
+---
+
+### Why This Matters
+
+Most beginner robotics projects stop at “the sensor works.”  
+Lesson Set 01 deliberately goes further. It teaches a professional pattern:
+
+> **Raw data → Clean interface → Fusion → Interpretation → Situation**
+
+This pattern scales. The same structure can later absorb more sensors, better filtering, or even simple learning without forcing a redesign of everything above it.
+
+You now have a robot that doesn’t just report numbers — it reports **meaning**.
+
+---
+
+### The Natural Next Step – Lesson Set 02 (OLED Displays)
+
+With a clean situational state available, the next step becomes both obvious and relatively easy:
+
+**Give the robot a face and give the human a window.**
+
+Lesson Set 02 will create two complementary OLED modules:
+
+1. **Serial OLED (On-board)**  
+   A display physically connected to the robot that shows either a debug view or an expressive face driven by `/situational_summary` and `/expression_hint`.
+
+2. **MQTT OLED (Remote)**  
+   The same information delivered wirelessly so a user can monitor the robot from a distance.
+
+Because Lesson Set 01 already ends with clean, high-level topics, the OLED modules do not need to understand PIR timings, ToF error codes, or fusion math. They only need to subscribe to the Combined State outputs and render them.
+
+This is why the foundation we just built is so valuable:  
+the hardest interpretive work is already done. Displaying it is now a natural and approachable next step.
+
+---
+
+**Lesson Set 01 is complete.**  
+You have taken four simple sensors and turned them into situational awareness.  
+The robot can now sense, interpret, and describe its immediate world.
+
+The next lesson will teach it how to *show* that understanding.
