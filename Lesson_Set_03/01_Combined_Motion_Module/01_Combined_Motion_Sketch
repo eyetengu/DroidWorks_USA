@@ -1,0 +1,81 @@
+/*
+ * DW_003_PIR_RCWL_Nano_millis_SERIAL.ino
+ * DroidWorks U.S.A. — Lesson Set 03
+ * Single Arduino Nano + PIR + RCWL-0516
+ *
+ * Pinout (classic Nano):
+ *   PIR  OUT → D2
+ *   RCWL OUT → D3
+ *   Both sensors: VIN/VCC → 5V, GND → GND
+ *
+ * Serial: 115200 baud
+ * Production line format (one line per update, space-separated):
+ *   PIR:0 RCWL:1 FUSED:0
+ *
+ * FUSED logic (easy to change later):
+ *   1 if either sensor is high (OR) – good for “any motion”
+ *   Change to AND if you want stricter confirmation.
+ *
+ * Design rules:
+ *   - millis() only, no delay() in the main loop
+ *   - State change detection so we don’t spam the serial line
+ *   - Clean startup banner for Serial Monitor debugging
+ *   - Ready for the ROS2 serial reader pattern
+ */
+
+const uint8_t PIN_PIR  = 2;
+const uint8_t PIN_RCWL = 3;
+
+const unsigned long BAUD = 115200;
+const unsigned long PRINT_INTERVAL_MS = 100;   // how often we re-check & print on change
+
+bool lastPir  = false;
+bool lastRcwl = false;
+bool lastFused = false;
+
+unsigned long lastPrintMs = 0;
+
+void setup() {
+  pinMode(PIN_PIR,  INPUT);
+  pinMode(PIN_RCWL, INPUT);
+
+  Serial.begin(BAUD);
+  while (!Serial && millis() < 2000) {
+    ; // wait briefly for USB serial on Nano
+  }
+
+  Serial.println();
+  Serial.println(F("DW_003 PIR+RCWL Nano ready"));
+  Serial.println(F("Format: PIR:x RCWL:y FUSED:z"));
+  Serial.println(F("--------------------------------"));
+}
+
+void loop() {
+  unsigned long now = millis();
+
+  // Read current states
+  bool pir  = digitalRead(PIN_PIR)  == HIGH;
+  bool rcwl = digitalRead(PIN_RCWL) == HIGH;
+
+  // Fused = OR (any motion). Change to && for AND logic.
+  bool fused = pir || rcwl;
+
+  // Only print when something changed or on a slow heartbeat
+  bool changed = (pir != lastPir) || (rcwl != lastRcwl) || (fused != lastFused);
+
+  if (changed || (now - lastPrintMs >= PRINT_INTERVAL_MS)) {
+    Serial.print(F("PIR:"));
+    Serial.print(pir ? 1 : 0);
+    Serial.print(F(" RCWL:"));
+    Serial.print(rcwl ? 1 : 0);
+    Serial.print(F(" FUSED:"));
+    Serial.println(fused ? 1 : 0);
+
+    lastPir   = pir;
+    lastRcwl  = rcwl;
+    lastFused = fused;
+    lastPrintMs = now;
+  }
+
+  // No delay() – loop stays free for future inserts (OLED, more sensors, etc.)
+}
