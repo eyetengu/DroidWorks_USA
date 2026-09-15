@@ -1,0 +1,112 @@
+/*
+ * DW_004_Combined_Distance_Nano_millis_SERIAL.ino
+ * DroidWorks U.S.A. — Combined Distance Sketch
+ * Arduino Nano + HC-SR04 (4-pin ultrasonic) + VL53L0X (ToF)
+ *
+ * Pinout (classic Nano):
+ *   HC-SR04:
+ *     VCC  → 5V
+ *     GND  → GND
+ *     Trig → D8
+ *     Echo → D9
+ *
+ *   VL53L0X (I2C):
+ *     VIN  → 5V
+ *     GND  → GND
+ *     SDA  → A4
+ *     SCL  → A5
+ *     XSHUT / GPIO1 → leave open
+ *
+ * Library required (Arduino Library Manager):
+ *   "VL53L0X" by Pololu
+ *
+ * Serial: 115200 baud
+ * Format: US:123 TOF:456 FUSED:123   (mm, -1 = invalid)
+ */
+
+#include <Wire.h>
+#include <VL53L0X.h>
+
+const uint8_t PIN_TRIG = 8;
+const uint8_t PIN_ECHO = 9;
+
+const unsigned long BAUD = 115200;
+const unsigned long SAMPLE_INTERVAL_MS = 100;
+const unsigned long US_TIMEOUT_US = 25000UL;
+
+VL53L0X tof;
+
+unsigned long lastSampleMs = 0;
+int16_t lastUsMm   = -1;
+int16_t lastTofMm  = -1;
+int16_t lastFusedMm = -1;
+
+int16_t readUltrasonicMm() {
+  digitalWrite(PIN_TRIG, LOW);
+  delayMicroseconds(2);
+  digitalWrite(PIN_TRIG, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(PIN_TRIG, LOW);
+
+  unsigned long duration = pulseIn(PIN_ECHO, HIGH, US_TIMEOUT_US);
+  if (duration == 0) return -1;
+
+  return (int16_t)(duration * 0.1715f);
+}
+
+int16_t readTofMm() {
+  if (tof.timeoutOccurred()) return -1;
+  uint16_t mm = tof.readRangeContinuousMillimeters();
+  if (mm > 2000) return -1;
+  return (int16_t)mm;
+}
+
+int16_t fuseDistances(int16_t usMm, int16_t tofMm) {
+  if (tofMm > 0) return tofMm;
+  if (usMm > 0) return usMm;
+  return -1;
+}
+
+void setup() {
+  pinMode(PIN_TRIG, OUTPUT);
+  pinMode(PIN_ECHO, INPUT);
+  digitalWrite(PIN_TRIG, LOW);
+
+  Serial.begin(BAUD);
+  while (!Serial && millis() < 2000) { ; }
+
+  Wire.begin();
+  tof.setTimeout(500);
+  if (!tof.init()) {
+    Serial.println(F("DW_004 ERROR: VL53L0X init failed"));
+  } else {
+    tof.startContinuous();
+    Serial.println(F("DW_004 VL53L0X ready"));
+  }
+
+  Serial.println(F("DW_004 Combined Distance ready"));
+  Serial.println(F("Format: US:xxx TOF:yyy FUSED:zzz"));
+}
+
+void loop() {
+  unsigned long now = millis();
+  if (now - lastSampleMs < SAMPLE_INTERVAL_MS) return;
+  lastSampleMs = now;
+
+  int16_t usMm  = readUltrasonicMm();
+  int16_t tofMm = readTofMm();
+  int16_t fused = fuseDistances(usMm, tofMm);
+
+  if (usMm != lastUsMm || tofMm != lastTofMm || fused != lastFusedMm) {
+    Serial.print(F("US:"));
+    Serial.print(usMm);
+    Serial.print(F(" TOF:"));
+    Serial.print(tofMm);
+    Serial.print(F(" FUSED:"));
+    Serial.println(fused);
+
+    lastUsMm = usMm;
+    lastTofMm = tofMm;
+    lastFusedMm = fused;
+  }
+}
