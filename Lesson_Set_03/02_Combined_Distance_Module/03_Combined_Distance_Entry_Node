@@ -22,7 +22,7 @@ import serial
 import serial.tools.list_ports
 
 
-SERIAL_PORT = '/dev/ttyUSB0'   # change to /dev/ttyACM0 if needed
+SERIAL_PORT = '/dev/ttyUSB1'   # change to /dev/ttyACM0 if needed
 BAUD_RATE   = 115200
 
 
