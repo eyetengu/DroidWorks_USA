@@ -94,3 +94,29 @@ If you just want to see something working quickly, look at the combined motion m
 ---
 
 ## Repository layout
+DroidWorks_USA/
+├── LESSON_PLAN/           # High-level overview and workspace setup
+├── Lesson_Set_01/         # Individual sensors + fusion + state
+├── Lesson_Set_02/         # OLED
+├── Lesson_Set_03/         # Sensor arrays on single MCU
+└── nano_droid.png
+
+
+---
+
+## Why this exists
+
+I am building this so that it can eventually support me, my dog, and the work I want to keep doing.
+
+That means the lessons have to be useful, the modules have to be reusable, and the whole system has to be something people can actually learn from and build on.
+
+If you are here to follow along — start with Lesson Set 01.
+
+If you are here to watch the process — the updates will keep coming.
+
+**Let’s build.**
+
+---
+
+*Maintained by Eric Young*  
+*GitHub: [eyetengu/DroidWorks_USA](https://github.com/eyetengu/DroidWorks_USA)*
