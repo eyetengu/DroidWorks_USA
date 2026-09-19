@@ -1,1 +1,9 @@
+This lesson set is devoted to the streamlining of the mcu/sensors in lesson set 01
+The idea is to use fewer mcus to deliver data from TWO complementary sensors instead of a single sensor.
+By bringing two sensors under the control of a single mcu we reduce complexity and cost.
+This also reduces the need for so many entry nodes. 
+Instead of a single entry node for each sensor we can use one entry node for each complementary sensor pair.
+Keep in mind that we are not looking to overwhelm the mcu but instead to improve the functionality by pairing like sensors into an array.
+
+Additionally, by doing it in this manner we reduce the complexity of discovering the mcus from four to two.
 
