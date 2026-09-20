@@ -1,71 +1,65 @@
 /*
-  Open Droid Lab — Nano Identity / Diagnostic Sketch
+  Open Droid Lab
+  Comprehensive Nano Diagnostic / Identity Sketch
 
   Purpose:
-    Print identifying information that the Arduino itself
-    can provide.
+    Investigate what information an Arduino Nano can provide
+    about itself, from low-level hardware information through
+    application-level identity.
 
-  This is an experiment, not a sensor application.
+  Information levels:
+
+    [0] Runtime
+    [1] Board
+    [2] MCU
+    [3] EEPROM
+    [4] Application Identity
+
+  NOTE:
+    USB VID/PID and USB serial-number information are NOT
+    normally available to the Arduino sketch. Those belong
+    to the USB interface and will be investigated from the
+    computer side.
 */
 
-void setup() {
-  Serial.begin(115200);
-
-  delay(1000);
-
-  Serial.println();
-  Serial.println("================================");
-  Serial.println("Open Droid Lab - Nano Identity");
-  Serial.println("================================");
-
-  Serial.println();
-  Serial.println("[DEVICE]");
-  Serial.println("Device: Arduino Nano");
-
-  Serial.println();
-  Serial.println("[MCU]");
-  Serial.print("Architecture: ");
-  Serial.println(F_CPU);
-
-  Serial.print("CPU Frequency: ");
-  Serial.print(F_CPU / 1000000);
-  Serial.println(" MHz");
-
-  Serial.println();
-  Serial.println("[MEMORY]");
-
-  Serial.print("Free SRAM: ");
-  Serial.print(freeMemory());
-  Serial.println(" bytes");
-
-  Serial.println();
-  Serial.println("[ARDUINO]");
-
-  Serial.print("Analog pins: ");
-  Serial.println(NUM_ANALOG_INPUTS);
-
-  Serial.print("Digital pins: ");
-  Serial.println(NUM_DIGITAL_PINS);
-
-  Serial.println();
-  Serial.println("[TIMING]");
-
-  Serial.print("millis(): ");
-  Serial.println(millis());
-
-  Serial.println();
-  Serial.println("[END]");
-  Serial.println();
-}
-
-void loop() {
-  // Nothing else to do.
-}
+#include <avr/io.h>
+#include <avr/boot.h>
+#include <avr/eeprom.h>
 
 
-// --------------------------------------------------
-// Estimate remaining SRAM
-// --------------------------------------------------
+// ============================================================
+// APPLICATION IDENTITY
+// ============================================================
+//
+// This is NOT a factory ID.
+//
+// This is an identity that WE assign to this particular
+// application/device.
+//
+// For testing multiple Nanos, change this value on each board.
+//
+// Example:
+//   ODL-NANO-0001
+//   ODL-NANO-0002
+//
+// Later we can decide whether this should live in EEPROM,
+// configuration, or another mechanism.
+//
+
+const char DEVICE_ID[] = "ODL-NANO-0001";
+
+const char DEVICE_TYPE[] = "DIAGNOSTIC";
+
+const char SENSOR_LIST[] = "NONE";
+
+const char FIRMWARE_VERSION[] = "1.0.0";
+
+const char PROTOCOL_VERSION[] = "ODL/1";
+
+
+// ============================================================
+// FREE SRAM
+// ============================================================
 
 extern unsigned int __heap_start;
 extern void *__brkval;
@@ -75,9 +69,269 @@ int freeMemory() {
 
   if ((int)__brkval == 0) {
     free_memory = ((int)&free_memory) - ((int)&__heap_start);
-  } else {
+  }
+  else {
     free_memory = ((int)&free_memory) - ((int)__brkval);
   }
 
   return free_memory;
+}
+
+
+// ============================================================
+// MCU SIGNATURE
+// ============================================================
+//
+// ATmega328P devices contain three signature bytes.
+//
+// These are chip-identification bytes supplied by the MCU.
+//
+// They are useful for identifying the MCU family/device.
+//
+// They are NOT a unique serial number for an individual Nano.
+//
+
+void printMCUSignature() {
+
+  uint8_t signature0 = boot_signature_byte_get(0x0000);
+  uint8_t signature1 = boot_signature_byte_get(0x0002);
+  uint8_t signature2 = boot_signature_byte_get(0x0004);
+
+  Serial.print("Signature:            0x");
+
+  if (signature0 < 0x10) Serial.print("0");
+  Serial.print(signature0, HEX);
+
+  Serial.print(" 0x");
+
+  if (signature1 < 0x10) Serial.print("0");
+  Serial.print(signature1, HEX);
+
+  Serial.print(" 0x");
+
+  if (signature2 < 0x10) Serial.print("0");
+  Serial.println(signature2, HEX);
+
+
+  // Recognize common ATmega328P signature.
+
+  if (
+    signature0 == 0x1E &&
+    signature1 == 0x95 &&
+    signature2 == 0x0F
+  ) {
+
+    Serial.println("MCU Device:          ATmega328P");
+
+  }
+  else {
+
+    Serial.println("MCU Device:          Unknown signature");
+
+  }
+}
+
+
+// ============================================================
+// RESET INFORMATION
+// ============================================================
+
+void printResetCause() {
+
+  uint8_t resetCause = MCUSR;
+
+  Serial.print("Reset Cause:          ");
+
+  if (resetCause == 0) {
+    Serial.println("Unknown");
+  }
+
+  if (resetCause & _BV(PORF)) {
+    Serial.println("Power-on reset");
+  }
+
+  if (resetCause & _BV(EXTRF)) {
+    Serial.println("External reset");
+  }
+
+  if (resetCause & _BV(BORF)) {
+    Serial.println("Brown-out reset");
+  }
+
+  if (resetCause & _BV(WDRF)) {
+    Serial.println("Watchdog reset");
+  }
+
+  if (resetCause & _BV(JTRF)) {
+    Serial.println("JTAG reset");
+  }
+
+  // Clear reset flags after reading them.
+
+  MCUSR = 0;
+}
+
+
+// ============================================================
+// SETUP
+// ============================================================
+
+void setup() {
+
+  Serial.begin(115200);
+
+  delay(1000);
+
+
+  Serial.println();
+  Serial.println("==============================================");
+  Serial.println(" Open Droid Lab - Nano Diagnostic");
+  Serial.println("==============================================");
+
+
+  // ==========================================================
+  // LEVEL 0 — RUNTIME
+  // ==========================================================
+
+  Serial.println();
+  Serial.println("[0] RUNTIME");
+  Serial.println("----------------------------------------------");
+
+  Serial.print("Uptime:               ");
+  Serial.print(millis());
+  Serial.println(" ms");
+
+  Serial.print("Free SRAM:             ");
+  Serial.print(freeMemory());
+  Serial.println(" bytes");
+
+
+  // ==========================================================
+  // LEVEL 1 — BOARD
+  // ==========================================================
+
+  Serial.println();
+  Serial.println("[1] BOARD");
+  Serial.println("----------------------------------------------");
+
+  Serial.println("Board:                Arduino Nano");
+
+  Serial.print("CPU Frequency:        ");
+  Serial.print(F_CPU / 1000000);
+  Serial.println(" MHz");
+
+  Serial.print("Analog Pins:          ");
+  Serial.println(NUM_ANALOG_INPUTS);
+
+  Serial.print("Digital Pins:         ");
+  Serial.println(NUM_DIGITAL_PINS);
+
+
+  // ==========================================================
+  // LEVEL 2 — MCU
+  // ==========================================================
+
+  Serial.println();
+  Serial.println("[2] MCU");
+  Serial.println("----------------------------------------------");
+
+  Serial.print("Architecture:         AVR");
+
+  Serial.println();
+
+  printMCUSignature();
+
+  printResetCause();
+
+
+  // ==========================================================
+  // LEVEL 3 — EEPROM
+  // ==========================================================
+
+  Serial.println();
+  Serial.println("[3] EEPROM");
+  Serial.println("----------------------------------------------");
+
+  Serial.print("EEPROM Size:          ");
+  Serial.print(E2END + 1);
+  Serial.println(" bytes");
+
+  Serial.println(
+    "EEPROM contains persistent user-programmable storage."
+  );
+
+  Serial.println(
+    "It is NOT automatically a unique factory identity."
+  );
+
+
+  // ==========================================================
+  // LEVEL 4 — APPLICATION IDENTITY
+  // ==========================================================
+
+  Serial.println();
+  Serial.println("[4] APPLICATION IDENTITY");
+  Serial.println("----------------------------------------------");
+
+  Serial.print("Device ID:            ");
+  Serial.println(DEVICE_ID);
+
+  Serial.print("Device Type:          ");
+  Serial.println(DEVICE_TYPE);
+
+  Serial.print("Sensors:              ");
+  Serial.println(SENSOR_LIST);
+
+  Serial.print("Firmware Version:     ");
+  Serial.println(FIRMWARE_VERSION);
+
+  Serial.print("Protocol Version:     ");
+  Serial.println(PROTOCOL_VERSION);
+
+
+  // ==========================================================
+  // USB NOTICE
+  // ==========================================================
+
+  Serial.println();
+  Serial.println("[USB]");
+  Serial.println("----------------------------------------------");
+
+  Serial.println(
+    "USB identity is investigated from the computer."
+  );
+
+  Serial.println(
+    "The Nano sketch does not normally know its USB VID/PID."
+  );
+
+  Serial.println(
+    "The computer may see VID, PID, description and"
+  );
+
+  Serial.println(
+    "possibly a USB serial number."
+  );
+
+
+  // ==========================================================
+  // END
+  // ==========================================================
+
+  Serial.println();
+  Serial.println("==============================================");
+  Serial.println(" Diagnostic Complete");
+  Serial.println("==============================================");
+  Serial.println();
+}
+
+
+// ============================================================
+// LOOP
+// ============================================================
+
+void loop() {
+
+  // Diagnostic information is printed once during setup.
+
 }
