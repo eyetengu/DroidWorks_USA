@@ -1,0 +1,69 @@
+```cpp
+/*
+  Open Droid Lab — EEPROM Device ID Announcer
+
+  Purpose:
+    Read a device ID stored in EEPROM and announce it
+    over the serial connection.
+
+  Example output:
+
+    DEVICE_ID:M001
+
+  The ROS 2 device_discovery_node can listen for this
+  message during device discovery.
+*/
+
+#include <EEPROM.h>
+
+const int EEPROM_START = 0;
+const int MAX_ID_LENGTH = 20;
+
+char deviceID[MAX_ID_LENGTH + 1];
+
+
+void readDeviceID() {
+  int i;
+
+  for (i = 0; i < MAX_ID_LENGTH; i++) {
+    deviceID[i] = EEPROM.read(EEPROM_START + i);
+
+    if (deviceID[i] == '\0') {
+      break;
+    }
+  }
+
+  deviceID[i] = '\0';
+}
+
+
+void announceDeviceID() {
+  Serial.print("DEVICE_ID:");
+  Serial.println(deviceID);
+}
+
+
+void setup() {
+  Serial.begin(115200);
+
+  delay(1000);
+
+  readDeviceID();
+
+  announceDeviceID();
+}
+
+
+void loop() {
+  /*
+    Announce the ID periodically.
+
+    This allows a discovery program to connect to the
+    Nano after startup and still receive its identity.
+  */
+
+  delay(2000);
+
+  announceDeviceID();
+}
+```
