@@ -1,7 +1,3 @@
-Here’s a clean Arduino sketch for the VL53L0X ToF sensor that matches the format of the previous modules:
-
-**File:** `02_ToF_sketch.ino`
-
 /*
   DroidWorks U.S.A. – ToF Sensor Module
   Lesson Set 01 | 02_ToF_sketch
