@@ -1,0 +1,116 @@
+import serial
+import serial.tools.list_ports
+import time
+import rclpy
+from rclpy.node import Node
+
+
+VID = 6790
+PID = 29987
+BAUD_RATE = 115200
+
+
+class DeviceDiscoveryNode(Node):
+
+    def __init__(self):
+        super().__init__('device_discovery_node')
+
+        self.get_logger().info("Droid Works USA Device Discovery started.")
+
+        self.discover_devices()
+
+    def discover_devices(self):
+
+        ports = serial.tools.list_ports.comports()
+
+        found = False
+
+        for port in ports:
+
+            if port.vid == VID and port.pid == PID:
+
+                found = True
+
+                self.get_logger().info(
+                    f"Found candidate device: {port.device}"
+                )
+
+                try:
+                    ser = serial.Serial(
+                        port.device,
+                        BAUD_RATE,
+                        timeout=2
+                    )
+
+                    start_time = time.time()
+
+                    while time.time() - start_time < 3:
+
+                        line = ser.readline().decode(
+                            'utf-8',
+                            errors='ignore'
+                        ).strip()
+
+                        if line.startswith("EID:"):
+
+                            self.process_device(line, port.device)
+
+                            break
+
+                    ser.close()
+
+                except Exception as e:
+
+                    self.get_logger().error(
+                        f"Could not open {port.device}: {e}"
+                    )
+
+        if not found:
+
+            self.get_logger().warn(
+                "No Droid Works USA USB devices found."
+            )
+
+    def process_device(self, line, port):
+
+        fields = line.split(",")
+
+        eid = ""
+        device_type = ""
+        sensor = ""
+
+        for field in fields:
+
+            if field.startswith("EID:"):
+                eid = field[4:]
+
+            elif field.startswith("TYPE:"):
+                device_type = field[5:]
+
+            elif field.startswith("SENSOR:"):
+                sensor = field[7:]
+
+        self.get_logger().info(
+            f"DEVICE FOUND | "
+            f"EID={eid} | "
+            f"TYPE={device_type} | "
+            f"SENSOR={sensor} | "
+            f"PORT={port}"
+        )
+
+
+def main(args=None):
+
+    rclpy.init(args=args)
+
+    node = DeviceDiscoveryNode()
+
+    rclpy.spin_once(node)
+
+    node.destroy_node()
+
+    rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
