@@ -312,15 +312,15 @@ In simple terms:
 > Enumeration means going through the available interfaces and making a list of what is present.
 
 Our Nano experiment produced:
-/dev/ttyUSB0
-/dev/ttyUSB1
-/dev/ttyUSB2
-/dev/ttyUSB3
-/dev/ttyUSB4
+ /dev/ttyUSB0
+ /dev/ttyUSB1
+ /dev/ttyUSB2
+ /dev/ttyUSB3
+ /dev/ttyUSB4
 
 The system also reported:
-VID=6790
-PID=29987
+ VID=6790
+ PID=29987
 for each of the five USB serial devices.
 
 This demonstrates that the computer can find the devices even though it cannot uniquely identify them using the available USB serial information.
@@ -331,27 +331,25 @@ USB devices commonly expose:
 
 ### VID
 **Vendor ID**
-This identifies the USB vendor.
+ This identifies the USB vendor.
 
 ### PID
 **Product ID**
-This identifies a product/device type associated with that vendor.
+ This identifies a product/device type associated with that vendor.
 
 Together:
 VID + PID
 can be useful for determining:
-
-> "Is this a USB device of the type I'm looking for?"
+  > "Is this a USB device of the type I'm looking for?"
 
 However, they generally do not answer:
-
-> "Which individual physical device is this?"
+  > "Which individual physical device is this?"
 
 Our five-Nano experiment demonstrated this distinction.
 
 All five reported the same values:
-VID=6790
-PID=29987
+ VID=6790
+ PID=29987
 
 Therefore the discovery node can use VID/PID as a **candidate filter**, but not as the final device identity.
 ---
@@ -360,28 +358,26 @@ Therefore the discovery node can use VID/PID as a **candidate filter**, but not 
 This is one of the most important concepts in this lesson.
 
 A serial port such as:
-/dev/ttyUSB0
+ /dev/ttyUSB0
 is an operating-system interface.
 It is not necessarily a permanent identity for the physical Nano.
 
 For example, after changing which devices are connected, Linux might produce:
-
-Nano M001 → /dev/ttyUSB3
-Nano M002 → /dev/ttyUSB0
+ Nano M001 → /dev/ttyUSB3
+ Nano M002 → /dev/ttyUSB0
 
 The physical devices have not changed.
 Only their operating-system port assignments have changed.
 
 Therefore:
-/dev/ttyUSB0
+ /dev/ttyUSB0
 should be thought of as:
-
-> "Where can I currently communicate with a device?"
+  > "Where can I currently communicate with a device?"
 
 while:
-M001
+ M001
 means:
-> "Which physical device is this?"
+  > "Which physical device is this?"
 
 That distinction becomes increasingly important as a project grows.
 ---
@@ -414,81 +410,81 @@ The final port number is discovered rather than hard-coded.
 ---
 
 # 12. Recommended Testing Procedure
-
 The easiest way to learn this system is to test each layer separately.
 
 ## Step 1 — Investigate the Nano
-Upload:
-Nano_Data_Output_sketch
-Open the Serial Monitor and record what the Nano can provide.
+ Upload:
+  Nano_Data_Output_sketch
+ Open the Serial Monitor and record what the Nano can provide.
+
 This establishes the baseline.
 ---
 
 ## Step 2 — Assign an ID
-Upload:
-EEPROM_Device_ID_Writer
-Set the ID for the particular physical Nano.
-
-For example:
-M001
+ Upload:
+  EEPROM_Device_ID_Writer
+ Set the ID for the particular physical Nano.
+ For example:
+  M001
 
 Upload the sketch.
 ---
 
 ## Step 3 — Verify the ID
-Upload:
-EEPROM_Device_ID_Reader
-The Serial Monitor should report:
-Device ID: M001
+ Upload:
+  EEPROM_Device_ID_Reader
 
-Power-cycle the Nano and verify it still reports:
-M001
+The Serial Monitor should report:
+ Device ID: M001
+
+ Power-cycle the Nano and verify it still reports:
+  M001
 
 This demonstrates persistent storage.
 ---
 
 ## Step 4 — Announce the ID
-Upload:
-EEPROM_Device_ID_Announcer
-The Serial Monitor should periodically show:
-DEVICE_ID:M001
+ Upload:
+  EEPROM_Device_ID_Announcer
 
+The Serial Monitor should periodically show:
+ DEVICE_ID:M001
 This demonstrates that the Nano can make its stored identity available through Serial.
 ---
 
 ## Step 5 — Discover the Nano from ROS 2
-Stop other ROS nodes that may already have the serial port open.
-Run:
-Device_Discovery_Node
+ Stop other ROS nodes that may already have the serial port open.
+ Run:
+  Device_Discovery_Node
 
 The node enumerates the serial devices and looks for candidate Nano USB devices.
 It then listens for the device announcement.
 The expected result is something similar to:
-Found 1 candidate USB device.
-Inspecting /dev/ttyUSB0...
-/dev/ttyUSB0 → DEVICE_ID:M001
-DISCOVERED: M001 on /dev/ttyUSB0
+ Found 1 candidate USB device.
+ Inspecting /dev/ttyUSB0...
+ /dev/ttyUSB0 → DEVICE_ID:M001
+ DISCOVERED: M001 on /dev/ttyUSB0
 ---
 
 # 13. Testing Multiple Nanos
 The real value of the system becomes apparent when multiple Nanos are connected.
-Program different IDs:
-Nano 1 → M001
-Nano 2 → M002
-Nano 3 → M003
+ Program different IDs:
+  Nano 1 → M001
+  Nano 2 → M002
+  Nano 3 → M003
 
-Connect them all.
+ Connect them all.
+
 The operating system might report:
-/dev/ttyUSB0
-/dev/ttyUSB1
-/dev/ttyUSB2
+ /dev/ttyUSB0
+ /dev/ttyUSB1
+ /dev/ttyUSB2
 
 The discovery node should determine which ID is associated with each port.
-
 For example:
-M002 → /dev/ttyUSB0
-M001 → /dev/ttyUSB1
-M003 → /dev/ttyUSB2
+ M002 → /dev/ttyUSB0
+ M001 → /dev/ttyUSB1
+ M003 → /dev/ttyUSB2
 
 The ordering does not matter.
 The important information is the discovered relationship.
@@ -511,26 +507,25 @@ Those can be added later.
 This is deliberate.
 
 We first establish:
-WHO ARE YOU?
+ WHO ARE YOU?
 before asking:
-WHAT CAN YOU DO?
+ WHAT CAN YOU DO?
 and eventually:
-WHERE ARE YOU?
+ WHERE ARE YOU?
 ---
 
 # 15. A Natural Expansion
 
 Once basic identity discovery works, the Nano could announce additional information.
-
 For example:
-DEVICE_ID:M001
-DEVICE_TYPE:MOTION
-SENSORS:PIR
+ DEVICE_ID:M001
+ DEVICE_TYPE:MOTION
+ SENSORS:PIR
 
 Another Nano might report:
-DEVICE_ID:M002
-DEVICE_TYPE:MOTION
-SENSORS:PIR,RCWL
+ DEVICE_ID:M002
+ DEVICE_TYPE:MOTION
+ SENSORS:PIR,RCWL
 
 A distance module might report:
 DEVICE_ID:M003
@@ -541,18 +536,18 @@ Now discovery has progressed beyond simply finding an ID.
 It is discovering **capabilities**.
 
 The conceptual structure becomes:
-DEVICE_ID
+ DEVICE_ID
     ↓
-Who is this physical device?
-DEVICE_TYPE
+ Who is this physical device?
+ DEVICE_TYPE
     ↓
-What general kind of device is it?
-SENSORS
+ What general kind of device is it?
+ SENSORS
     ↓
-What capabilities does it provide?
-LOCATION
+ What capabilities does it provide?
+ LOCATION
     ↓
-Where is it installed?
+ Where is it installed?
 
 Location can be added later when there is an actual need for it.
 ---
@@ -560,7 +555,7 @@ Location can be added later when there is an actual need for it.
 # 16. Why This Is Useful
 A discovery system becomes increasingly valuable as the number of devices grows.
 With one Nano:
-/dev/ttyUSB0
+ /dev/ttyUSB0
 may be perfectly adequate.
 
 With five Nanos, hard-coding every port becomes increasingly fragile.
@@ -569,26 +564,26 @@ A discovery system allows the software to ask the devices who they are rather th
 This also makes the system easier to expand.
 
 A new Nano can be:
-1. assigned an ID
-2. connected
-3. discovered
-4. identified
-5. incorporated into the system
+ 1. assigned an ID
+ 2. connected
+ 3. discovered
+ 4. identified
+ 5. incorporated into the system
 without necessarily changing a hard-coded port assignment.
 ---
 
 # 17. An Important Limitation
 The custom EEPROM ID is only as reliable as the process used to assign it.
 For example, accidentally programming two devices with:
-M001
+ M001
 would create an identity collision.
 
 The discovery system might then find:
-M001 → /dev/ttyUSB0
-M001 → /dev/ttyUSB1
+ M001 → /dev/ttyUSB0
+ M001 → /dev/ttyUSB1
 
 This is not a failure of EEPROM.
-It is a configuration problem.
+It is a configuration problem. aka Operator Error
 
 Therefore, a production-quality system would eventually need rules for:
 * generating IDs
@@ -608,108 +603,102 @@ It simply provides a persistent identifier that our system can use to distinguis
 For this project, that distinction is important.
 
 We are solving:
-> "Which module is this?"
-
+  > "Which module is this?"
 not:
-> "Can I cryptographically authenticate this hardware?"
-
+  > "Can I cryptographically authenticate this hardware?"
 Those are different problems.
 ---
 
 # 19. Why the Announcer Is Separate
 It might eventually seem unnecessary to have:
-Reader
-Announcer
+ Reader
+ Announcer
 as separate sketches.
 
 For learning purposes, however, the separation is valuable.
 
 ### Writer
-**Stores information.**
-Writer → EEPROM
+  **Stores information.**
+    Writer → EEPROM
 
 ### Reader
-**Retrieves information for verification.**
-EEPROM → Reader → Serial Monitor
+  **Retrieves information for verification.**
+    EEPROM → Reader → Serial Monitor
 
 ### Announcer
-**Makes information available to another system.**
-EEPROM → Announcer → Serial → Discovery Node
+  **Makes information available to another system.**
+    EEPROM → Announcer → Serial → Discovery Node
 
 Each program therefore demonstrates a different concept.
 ---
 
 # 20. Vocabulary
-### EEPROM
-Non-volatile memory available on many microcontrollers.
-Information stored there can survive a power cycle.
+ ### EEPROM
+  Non-volatile memory available on many microcontrollers.
+  Information stored there can survive a power cycle.
 
-### Device ID
-An identifier assigned to a particular physical device.
-Example:
-M001
+ ### Device ID
+  An identifier assigned to a particular physical device.
+  Example:
+   M001
 
-### VID
-USB Vendor ID.
-Used to identify a USB vendor.
+ ### VID
+  USB Vendor ID.
+  Used to identify a USB vendor.
 
-### PID
-USB Product ID.
-Used to identify a USB product/device type.
+ ### PID
+  USB Product ID.
+  Used to identify a USB product/device type.
 
-### Enumeration
-The process of discovering available devices or interfaces.
+ ### Enumeration
+  The process of discovering available devices or interfaces.
 
-### Serial
-A communication method where data is transmitted sequentially.
+ ### Serial
+  A communication method where data is transmitted sequentially.
 
-### Serial port
-The operating-system interface used to communicate with a serial device.
-Example:
-/dev/ttyUSB0
+ ### Serial port
+  The operating-system interface used to communicate with a serial device.
+  Example:
+   /dev/ttyUSB0
 
-### Discovery
-Finding available devices and determining useful information about them.
+ ### Discovery
+  Finding available devices and determining useful information about them.
 
-### Identification
-Determining which particular device is being communicated with.
+ ### Identification
+  Determining which particular device is being communicated with.
 
-### Announcement
-A device sending information about itself without necessarily being asked.
+ ### Announcement
+  A device sending information about itself without necessarily being asked.
 
-### Metadata
-Information about a device rather than the device's normal sensor data.
-For example:
-DEVICE_ID:M001
-is metadata.
+ ### Metadata
+  Information about a device rather than the device's normal sensor data.
+  For example:
+   DEVICE_ID:M001
+  is metadata.
 
-A reading such as:
-pir:1
-is sensor data.
+  A reading such as:
+   pir:1
+  is sensor data.
 ---
 
 # 21. The Bigger Picture
-This small experiment introduces a pattern that can be reused throughout the larger Open Droid Lab project.
+This small experiment introduces a pattern that can be reused throughout the larger Droid Works USA project.
 The system can gradually evolve from:
-Sensor reading
-
-to:
-Sensor identity
-
-to:
-Device identity
-
-to:
-Device capability
-
-to:
-Device location
+ Sensor reading
+  to:
+ Sensor identity
+  to:
+ Device identity
+  to:
+ Device capability
+  to:
+ Device location
 
 For example:
-DEVICE_ID:M001
-DEVICE_TYPE:MOTION
-SENSORS:PIR
-LOCATION:OFFICE
+ DEVICE_ID:M001
+ DEVICE_TYPE:MOTION
+ SENSORS:PIR
+ LOCATION:OFFICE
 
 The important point is that these pieces of information do not have to be introduced all at once.
 Each solves a different problem.
@@ -717,23 +706,23 @@ Each solves a different problem.
 
 # 22. Final Concept
 The key lesson from this experiment is:
-> **A computer finding a USB device is not the same thing as knowing which physical device it has found.**
+  > **A computer finding a USB device is not the same thing as knowing which physical device it has found.**
 
 USB enumeration answers:
-"What devices/interfaces are available?"
+  "What devices/interfaces are available?"
 
 VID/PID can help answer:
-"Is this the type of USB device I'm interested in?"
+  "Is this the type of USB device I'm interested in?"
 
 The device ID can answer:
-"Which physical module is this?"
+  "Which physical module is this?"
 
 And eventually device metadata can answer:
-"What kind of device is it?"
-"What sensors does it have?"
-"Where is it installed?"
+  "What kind of device is it?"
+  "What sensors does it have?"
+  "Where is it installed?"
 
-That gives us a foundation for a more capable ROS 2 discovery system without introducing unnecessary complexity too early.
+That gives us a foundation for a more capable ROS2 discovery system without introducing unnecessary complexity too early.
 ---
 
 ## Component Summary
@@ -758,7 +747,7 @@ That gives us a foundation for a more capable ROS 2 discovery system without int
         │
         │ Serial
         ↓
-   ROS 2 Discovery
+   ROS2 Discovery
         │
         ↓
   Device identity
