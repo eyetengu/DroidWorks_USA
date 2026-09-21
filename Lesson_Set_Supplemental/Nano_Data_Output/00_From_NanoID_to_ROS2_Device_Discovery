@@ -79,7 +79,7 @@ It is useful because it separates two questions:
 2. **What information does the computer know about the USB device?**
 
 These are not necessarily the same thing.
-The Arduino CAN PROVIDE INFORMATION from its microcontroller and program environment, while Linux CAN OBTAIN INFORMATION from the USB interface.
+The Arduino CAN PROVIDE information from its microcontroller and program environment, while Linux CAN OBTAIN information from the USB interface.
 
 For example, Linux may report:
 device=/dev/ttyUSB0
