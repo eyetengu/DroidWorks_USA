@@ -30,3 +30,111 @@ df -h /
 
 ==================================================
 
+## ROS 2 Node Running Old Python Code After Editing
+
+### Symptom
+
+You edit a Python ROS 2 node, but when you run it, the terminal shows behavior or log messages from the **previous version** of the code.
+
+For example, the OLED node was supposed to use EEPROM-based device discovery, but initially reported:
+
+```text
+Opened serial port: /dev/ttyUSB4
+OLED Serial bridge started
+Sending to /dev/ttyUSB4 @ 115200 baud
+```
+
+The new source code did not contain those log messages and was supposed to discover the OLED by its EEPROM metadata.
+
+### Cause
+
+ROS 2 executes the package installed in the workspace's `install/` directory.
+
+Editing the source file does **not** automatically update the installed package.
+
+The source code must be rebuilt before ROS 2 will use the changes.
+
+### Fix
+
+From the workspace:
+
+```bash
+cd ~/rpi_ws
+```
+
+Build the specific package:
+
+```bash
+colcon build --packages-select droidworks_display
+```
+
+Then source the updated workspace:
+
+```bash
+source install/setup.bash
+```
+
+Run the node again:
+
+```bash
+ros2 run droidworks_display oled_serial
+```
+
+### Verification
+
+After rebuilding, the OLED node correctly reported:
+
+```text
+Searching for OLED device...
+Checking candidate: /dev/ttyUSB7
+Device announcement: EID:DWUSA-01-01-01,TYPE:MOTION,SENSOR:PIR
+Checking candidate: /dev/ttyUSB6
+Device announcement: EID:DWUSA-01-04-01,TYPE=DISTANCE,SENSOR=ULTRASONIC
+Checking candidate: /dev/ttyUSB5
+Device announcement: EID: DWUSA-01-03-01,TYPE=DISTANCE,SENSOR=TOF
+Checking candidate: /dev/ttyUSB4
+Device announcement: EID:DWUSA-01-02-01,TYPE=MOTION,SENSOR=RCWL
+Checking candidate: /dev/ttyUSB0
+Device announcement: EID:DWUSA-02-01-01,TYPE=DISPLAY,SENSOR=OLED
+OLED FOUND | EID=DWUSA-02-01-01 | PORT=/dev/ttyUSB0
+OLED Serial bridge started
+```
+
+This confirmed that the **new source code was actually being executed** and that OLED discovery was working correctly.
+
+### Quick Rule
+
+After changing a Python ROS 2 node:
+
+```bash
+cd ~/rpi_ws
+colcon build --packages-select <package_name>
+source install/setup.bash
+ros2 run <package_name> <node_name>
+```
+
+If the node still behaves like the old version, verify which Python module is being executed:
+
+```bash
+python3 -c "import <package>.<module> as m; print(m.__file__)"
+```
+
+This shows the actual installed Python module path being imported.
+
+### Lesson
+
+**Editing source code and running source code are not necessarily the same thing in a ROS 2 workspace.**
+
+The normal workflow is:
+
+**Edit → Build → Source → Run**
+
+==================================================
+
+
+
+
+
+
+
+==================================================
