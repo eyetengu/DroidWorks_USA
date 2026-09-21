@@ -1,0 +1,27 @@
+#include <EEPROM.h>
+
+const int EEPROM_START = 0;
+const int MAX_ID_LENGTH = 20;
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  char deviceID[MAX_ID_LENGTH + 1];
+
+  for (int i = 0; i < MAX_ID_LENGTH; i++) {
+    deviceID[i] = EEPROM.read(EEPROM_START + i);
+
+    if (deviceID[i] == '\0') {
+      break;
+    }
+  }
+
+  deviceID[MAX_ID_LENGTH] = '\0';
+
+  Serial.print("Device ID: ");
+  Serial.println(deviceID);
+}
+
+void loop() {
+}
