@@ -1,85 +1,218 @@
 #!/usr/bin/env python3
+
 """
-DroidWorks U.S.A. – Ultrasonic Sensor Module
-Lesson Set 01 | 03_Ultrasonic_entryNode
+Droid Works USA – Ultrasonic Entry Node
 
-Reads serial lines in the format:
-    ultrasonic:15.4
-
-and publishes the distance as a Float32 on /ultrasonic_distance
+Discovers the ultrasonic device using EEPROM metadata,
+then converts cm → mm and publishes valid distance
+on /ultrasonic_distance.
 """
 
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32
+
 import serial
+import serial.tools.list_ports
 import re
-import threading
+import time
+
+
+VID = 6790
+PID = 29987
+BAUD_RATE = 115200
 
 
 class UltrasonicEntry(Node):
+
     def __init__(self):
-        super().__init__('ultrasonic_entry')
+        super().__init__('ultrasonic_node')
 
-        # Publisher
-        self.publisher_ = self.create_publisher(Float32, 'ultrasonic_distance', 10)
-
-        # Serial port parameters (adjust if needed)
-        self.port = '/dev/ttyUSB0'      # or /dev/ttyACM0
-        self.baudrate = 115200
-        self.timeout = 1.0
+        self.publisher_ = self.create_publisher(
+            Float32,
+            'ultrasonic_distance',
+            10
+        )
 
         self.ser = None
-        self.running = True
 
-        # Regex to extract the number after "ultrasonic:"
-        self.pattern = re.compile(r'ultrasonic:([-+]?\d*\.?\d+)')
+        # Pattern for: ultrasonic:118.5
+        self.pattern = re.compile(
+            r'ultrasonic:([-+]?\d*\.?\d+)'
+        )
 
-        # Start serial reading in a background thread
-        self.serial_thread = threading.Thread(target=self.read_serial, daemon=True)
-        self.serial_thread.start()
+        self.get_logger().info(
+            'Searching for Ultrasonic device...'
+        )
 
-        self.get_logger().info('Ultrasonic entry node started. Listening for distance data...')
+        self.discover_device()
+
+        if self.ser is not None:
+            self.timer = self.create_timer(
+                0.01,
+                self.read_serial
+            )
+
+    def discover_device(self):
+
+        ports = serial.tools.list_ports.comports()
+
+        for port in ports:
+
+            if port.vid != VID or port.pid != PID:
+                continue
+
+            self.get_logger().info(
+                f'Checking candidate: {port.device}'
+            )
+
+            try:
+                ser = serial.Serial(
+                    port.device,
+                    BAUD_RATE,
+                    timeout=0.5
+                )
+
+                start_time = time.time()
+
+                while time.time() - start_time < 6:
+
+                    raw = ser.readline()
+
+                    if not raw:
+                        continue
+
+                    line = raw.decode(
+                        'utf-8',
+                        errors='ignore'
+                    ).strip()
+
+                    if not line:
+                        continue
+
+                    if line.startswith('EID:'):
+
+                        self.get_logger().info(
+                            f'Device announcement: {line}'
+                        )
+
+                        fields = line.split(',')
+
+                        eid = ''
+                        device_type = ''
+                        sensor = ''
+
+                        for field in fields:
+
+                            if field.startswith('EID:'):
+                                eid = field[4:].strip()
+
+                            elif field.startswith('TYPE:'):
+                                device_type = field[5:].strip()
+
+                            elif field.startswith('SENSOR:'):
+                                sensor = field[7:].strip()
+
+                        if (
+                            device_type == 'DISTANCE'
+                            and sensor == 'ULTRASONIC'
+                        ):
+
+                            self.ser = ser
+
+                            self.get_logger().info(
+                                f'ULTRASONIC FOUND | '
+                                f'EID={eid} | '
+                                f'PORT={port.device}'
+                            )
+
+                            return
+
+                        break
+
+                ser.close()
+
+            except Exception as e:
+
+                self.get_logger().warn(
+                    f'Could not check {port.device}: {e}'
+                )
+
+        self.get_logger().error(
+            'No Ultrasonic device found.'
+        )
 
     def read_serial(self):
-        try:
-            self.ser = serial.Serial(self.port, self.baudrate, timeout=self.timeout)
-            self.get_logger().info(f'Opened serial port: {self.port}')
-        except serial.SerialException as e:
-            self.get_logger().error(f'Failed to open serial port {self.port}: {e}')
+
+        if self.ser is None:
             return
 
-        while self.running and rclpy.ok():
-            try:
-                line = self.ser.readline().decode('utf-8', errors='ignore').strip()
-                if not line:
-                    continue
+        try:
 
-                match = self.pattern.search(line)
-                if match:
-                    distance = float(match.group(1))
-                    msg = Float32()
-                    msg.data = distance
-                    self.publisher_.publish(msg)
-                    # Optional debug:
-                    # self.get_logger().info(f'Published: {distance:.1f} cm')
-            except Exception as e:
-                self.get_logger().warn(f'Serial read error: {e}')
+            raw = self.ser.readline()
+
+            if not raw:
+                return
+
+            line = raw.decode(
+                'utf-8',
+                errors='ignore'
+            ).strip()
+
+            if not line:
+                return
+
+            match = self.pattern.search(line)
+
+            if not match:
+                return
+
+            value_str = match.group(1)
+
+            try:
+                distance_cm = float(value_str)
+            except (ValueError, TypeError):
+                return
+
+            # Reject clearly invalid readings.
+            if distance_cm <= 0.0 or distance_cm > 400.0:
+                return
+
+            # Convert centimeters to millimeters.
+            distance_mm = distance_cm * 10.0
+
+            msg = Float32()
+            msg.data = distance_mm
+
+            self.publisher_.publish(msg)
+
+        except Exception as e:
+
+            if rclpy.ok():
+                self.get_logger().warn(
+                    f'Serial read error: {e}'
+                )
 
     def destroy_node(self):
-        self.running = False
-        if self.ser and self.ser.is_open:
+
+        if self.ser is not None and self.ser.is_open:
             self.ser.close()
+
         super().destroy_node()
 
 
 def main(args=None):
+
     rclpy.init(args=args)
+
     node = UltrasonicEntry()
+
     try:
         rclpy.spin(node)
+
     except KeyboardInterrupt:
         pass
+
     finally:
         node.destroy_node()
         rclpy.shutdown()
