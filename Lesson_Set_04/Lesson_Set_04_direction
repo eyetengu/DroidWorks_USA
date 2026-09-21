@@ -1,0 +1,104 @@
+DroidWorks U.S.A. • Lesson Set 04
+Orientation, Shock & Tilt Awareness | Page 1
+Lesson Set 04 — Orientation, Shock & Tilt Awareness
+IMU (MPU-6050) + Vibration Switches + Tilt Switch on Arduino Nano
+Course Introduction Document • DroidWorks U.S.A.
+1. Purpose of This Lesson Set
+Up to this point the droid has learned to notice movement (PIR + RCWL) and measure distance
+(ultrasonic / ToF). Those sensors answer the question “Is something moving near me?” and “How far
+away is it?”
+Lesson Set 04 answers a different set of questions the droid needs in order to behave like a coherent
+character:
+• Which way am I oriented? (upright, leaning, tipped)
+• Am I accelerating or being moved?
+• Did something just hit or bump me hard?
+• Is my body currently tilted beyond a safe angle?
+These capabilities form the foundation for later head tracking, reactive “ouch” behaviors, safer
+movement, and richer fused state that can drive sound, lights, and motion.
+2. Sensor Roles in This Set
+Sensor What it provides Droid value
+MPU-6050 Continuous 3-axis acceleration + 3-axis
+gyroscope (orientation & motion)
+Head/body attitude, lean detection,
+smooth motion awareness
+SW-18015P (×1 or ×2) Discrete hard shock / impact events
+(digital pulse)
+Clean “bump / hit” triggers for sound or
+state changes
+Tilt switch Simple binary orientation (upright vs
+tilted)
+Fast “I’m tipped over” safety or character
+state
+The MPU-6050 supplies rich continuous data. The mechanical switches supply clean, low-effort
+discrete events. Together they create layered awareness without overloading a single sensor or the
+microcontroller.
+3. Feasibility on Arduino Nano
+Short answer: Yes — this combination is well within the Nano’s capabilities and is not
+overloaded.
+Resource picture:
+• MPU-6050: Uses only the I2C bus (A4/A5). Modest sampling rates (20–50 Hz) are light work.
+• SW-18015P: Simple digital switch. One digital pin + INPUT_PULLUP (or module DO pin).
+Extremely low overhead.
+• Tilt switch: Pure digital input. Negligible cost.
+• The Nano still has ample pins, flash, and RAM left for millis-based timing, simple fusion, and
+serial output to the ROS 2 pipeline.
+Practical guidelines that keep the node reliable:
+1. Debounce the mechanical switches (vibration switches in particular produce short, noisy
+pulses).
+DroidWorks U.S.A. • Lesson Set 04
+Orientation, Shock & Tilt Awareness | Page 2
+2. Sample the MPU moderately (20–50 Hz is plenty for droid awareness). Avoid unnecessary
+high-rate streaming.
+3. Consider interrupts for the vibration switches if you want very responsive shock detection
+without constant polling.
+4. Mount carefully — vibration switch sensitivity depends heavily on placement and orientation on
+the chassis or dome.
+4. How This Fits the Overall Architecture
+Lesson Set 04 continues the same modular pattern established in Sets 01–03:
+• Individual sensor nodes first (or a combined MCU sketch that still treats each sensor cleanly)
+• Simple fusion into higher-level state
+• Publication as ROS 2 topics that later nodes (OLED, sound, motion) can consume without
+rewriting earlier work
+Suggested topic direction (still evolving with the preferred naming style):
+• /imu/data or simplified /orientation_state + /accel_events
+• /shock_event (from SW-18015P)
+• /tilt_state
+• /fused_awareness (optional higher-level combination of motion + orientation + shock)
+Because the earlier motion and ranging nodes remain independent, adding orientation awareness does
+not force rework of the PIR/RCWL or distance pipelines. This is intentional and supports the long-term
+goal of reusable, teachable modules.
+5. Parts Already on Hand
+This lesson set is designed around parts already available in the lab:
+• MPU-6050 modules
+• SW-18015P shock/vibration switches (one or two recommended)
+• Tilt switch
+• Arduino Nano as the local MCU (consistent with earlier sensor nodes)
+The same millis-based sketch style used in the PIR/RCWL and combined distance sketches will be
+extended here so students see continuity rather than a completely new coding pattern.
+6. Learning Outcomes
+By the end of Lesson Set 04 a student should be able to:
+1. Wire and read an MPU-6050 on an Arduino Nano and extract useful orientation/acceleration
+information.
+2. Add one or two SW-18015P vibration switches and a tilt switch, handle debouncing, and treat
+them as clean digital events.
+3. Publish the resulting data in a form that fits the existing ROS 2 sensor pipeline.
+4. Explain why continuous IMU data and discrete mechanical switches are complementary rather
+than redundant.
+5. Design simple reactive behaviors (sound, state change, later motion) driven by orientation or
+shock events.
+7. Next Steps After This Introduction
+
+This document is the conceptual and architectural introduction. Subsequent materials in the set will
+cover:
+DroidWorks U.S.A. • Lesson Set 04
+Orientation, Shock & Tilt Awareness | Page 3
+• Detailed wiring and pin recommendations
+• Reference sketches (millis style, matching previous lessons)
+• Basic fusion logic and example ROS 2 topic structure
+• Suggested experiments and failure modes to explore
+This layer of awareness is one of the most important steps toward a droid that feels present and
+reactive rather than simply a collection of independent sensors. It remains fully modular, teachable, and
+compatible with the long-term goal of a sustainable, reproducible droid platform.
+DroidWorks U.S.A. • Lesson Set 04 Introduction
+Quote
+Explain
