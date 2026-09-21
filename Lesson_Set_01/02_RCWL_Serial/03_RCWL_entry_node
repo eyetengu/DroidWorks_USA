@@ -1,88 +1,221 @@
+```python
 #!/usr/bin/env python3
+
+import time
 
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Bool
+
 import serial
-import threading
+import serial.tools.list_ports
+
+
+VID = 6790
+PID = 29987
+BAUD_RATE = 115200
+
 
 class RcwlMotionNode(Node):
+
     def __init__(self):
         super().__init__('rcwl_motion_node')
 
-        # --- Parameters (you can change these later with ros2 param) ---
-        self.declare_parameter('port', '/dev/ttyUSB1')      # Change if needed
-        self.declare_parameter('baudrate', 9600)
-        self.declare_parameter('topic_name', 'rcwl_state')
+        self.publisher_ = self.create_publisher(
+            Bool,
+            'rcwl_state',
+            10
+        )
 
-        port = self.get_parameter('port').get_parameter_value().string_value
-        baudrate = self.get_parameter('baudrate').get_parameter_value().integer_value
-        topic_name = self.get_parameter('topic_name').get_parameter_value().string_value
+        self.ser = None
 
-        # Publisher
-        self.publisher_ = self.create_publisher(Bool, topic_name, 10)
+        self._discover_rcwl()
 
-        # Open serial port
-        try:
-            self.ser = serial.Serial(port, baudrate, timeout=1)
-            self.get_logger().info(f'Connected to {port} at {baudrate} baud')
-        except serial.SerialException as e:
-            self.get_logger().error(f'Failed to open serial port: {e}')
-            raise
+        self.create_timer(
+            0.05,
+            self._serial_timer_callback
+        )
 
-        # Start a background thread to read serial
-        self.running = True
-        self.thread = threading.Thread(target=self.serial_reader)
-        self.thread.daemon = True
-        self.thread.start()
+    def _discover_rcwl(self):
 
-        self.get_logger().info('RCWL Motion Node started. Publishing on /motion')
+        self.get_logger().info(
+            'Searching for RCWL device...'
+        )
 
-    def serial_reader(self):
-        while self.running and rclpy.ok():
+        ports = serial.tools.list_ports.comports()
+
+        for port in ports:
+
+            if port.vid != VID or port.pid != PID:
+                continue
+
+            self.get_logger().info(
+                f'Checking candidate: {port.device}'
+            )
+
             try:
-                line = self.ser.readline().decode('utf-8').strip()
-                if not line:
-                    continue
 
-                # Parse messages coming from Arduino
-                if line == "motion:1":
-                    msg = Bool()
-                    msg.data = True
-                    self.publisher_.publish(msg)
-                    self.get_logger().info('Motion detected → published True')
+                ser = serial.Serial(
+                    port.device,
+                    BAUD_RATE,
+                    timeout=0.5
+                )
 
-                elif line == "motion:0":
-                    msg = Bool()
-                    msg.data = False
-                    self.publisher_.publish(msg)
-                    self.get_logger().info('No motion → published False')
+                start_time = time.time()
 
-                elif line == "rcwl_ready":
-                    self.get_logger().info('Arduino is ready')
+                while time.time() - start_time < 6:
 
-            except Exception as e:
-                self.get_logger().error(f'Serial read error: {e}')
-                break
+                    raw = ser.readline()
+
+                    if not raw:
+                        continue
+
+                    line = raw.decode(
+                        'utf-8',
+                        errors='ignore'
+                    ).strip()
+
+                    if line.startswith('EID:'):
+
+                        self.get_logger().info(
+                            f'Device announcement: {line}'
+                        )
+
+                        fields = line.split(',')
+
+                        eid = ''
+                        device_type = ''
+                        sensor = ''
+
+                        for field in fields:
+
+                            if field.startswith('EID:'):
+                                eid = field[4:]
+
+                            elif field.startswith('TYPE:'):
+                                device_type = field[5:]
+
+                            elif field.startswith('SENSOR:'):
+                                sensor = field[7:]
+
+                        if (
+                            device_type == 'MOTION'
+                            and sensor == 'RCWL'
+                        ):
+
+                            self.ser = ser
+
+                            self.get_logger().info(
+                                f'RCWL FOUND | '
+                                f'EID={eid} | '
+                                f'PORT={port.device}'
+                            )
+
+                            return
+
+                        break
+
+                ser.close()
+
+            except serial.SerialException as e:
+
+                self.get_logger().warn(
+                    f'Could not open {port.device}: {e}'
+                )
+
+        self.get_logger().error(
+            'No RCWL device found.'
+        )
+
+    def _serial_timer_callback(self):
+
+        if self.ser is None or not self.ser.is_open:
+            return
+
+        try:
+
+            while self.ser.in_waiting > 0:
+
+                raw = self.ser.readline()
+
+                if not raw:
+                    break
+
+                line = raw.decode(
+                    'utf-8',
+                    errors='ignore'
+                ).strip()
+
+                if line:
+                    self._handle_line(line)
+
+        except serial.SerialException as e:
+
+            self.get_logger().error(
+                f'Serial read error: {e}'
+            )
+
+            self.ser = None
+
+    def _handle_line(self, line):
+
+        if line == 'rcwl:1':
+
+            msg = Bool()
+            msg.data = True
+
+            self.publisher_.publish(msg)
+
+            self.get_logger().info(
+                'Motion detected → published True'
+            )
+
+        elif line == 'rcwl:0':
+
+            msg = Bool()
+            msg.data = False
+
+            self.publisher_.publish(msg)
+
+            self.get_logger().info(
+                'No motion → published False'
+            )
+
+        else:
+
+            self.get_logger().debug(
+                f'MCU: {line}'
+            )
 
     def destroy_node(self):
-        self.running = False
-        if hasattr(self, 'ser') and self.ser.is_open:
+
+        if self.ser is not None and self.ser.is_open:
             self.ser.close()
+
         super().destroy_node()
 
 
 def main(args=None):
+
     rclpy.init(args=args)
+
     node = RcwlMotionNode()
+
     try:
         rclpy.spin(node)
+
     except KeyboardInterrupt:
         pass
+
     finally:
+        node.get_logger().info(
+            'Shutting down'
+        )
+
         node.destroy_node()
         rclpy.shutdown()
 
 
 if __name__ == '__main__':
     main()
+```
