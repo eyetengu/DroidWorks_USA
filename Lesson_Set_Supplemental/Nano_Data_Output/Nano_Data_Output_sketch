@@ -187,7 +187,7 @@ void setup() {
 
   Serial.println();
   Serial.println("==============================================");
-  Serial.println(" Open Droid Lab - Nano Diagnostic");
+  Serial.println(" DroidWorksUSA - Nano Diagnostic");
   Serial.println("==============================================");
 
 
