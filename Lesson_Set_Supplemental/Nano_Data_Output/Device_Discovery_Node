@@ -1,0 +1,252 @@
+#!/usr/bin/env python3
+
+"""
+Open Droid Lab — Device Discovery Node
+
+Purpose:
+    Discover Arduino devices connected through USB serial.
+
+Discovery process:
+
+    1. Enumerate serial ports.
+    2. Filter for our known USB VID/PID.
+    3. Open each candidate.
+    4. Listen for:
+           DEVICE_ID:M001
+    5. Report discovered devices.
+
+This is an experimental discovery node.
+It does not publish ROS topics yet.
+"""
+
+import time
+
+import rclpy
+from rclpy.node import Node
+
+import serial
+import serial.tools.list_ports
+
+
+# --------------------------------------------------
+# USB identification
+# --------------------------------------------------
+
+TARGET_VID = 6790
+TARGET_PID = 29987
+
+BAUD_RATE = 115200
+
+# How long to listen to each device
+LISTEN_TIME = 3.0
+
+
+class DeviceDiscoveryNode(Node):
+    """ROS 2 node for discovering Arduino devices."""
+
+    def __init__(self):
+        super().__init__('device_discovery_node')
+
+        self.get_logger().info(
+            'Device Discovery node started'
+        )
+
+        self.discover_devices()
+
+    # --------------------------------------------------
+    # Find candidate USB devices
+    # --------------------------------------------------
+
+    def find_candidate_ports(self):
+        candidates = []
+
+        self.get_logger().info(
+            'Scanning serial ports...'
+        )
+
+        for port in serial.tools.list_ports.comports():
+
+            self.get_logger().info(
+                f'  {port.device} '
+                f'VID={port.vid} '
+                f'PID={port.pid} '
+                f'description={port.description}'
+            )
+
+            if (
+                port.vid == TARGET_VID
+                and port.pid == TARGET_PID
+            ):
+                candidates.append(port.device)
+
+        return candidates
+
+    # --------------------------------------------------
+    # Listen to one device
+    # --------------------------------------------------
+
+    def inspect_device(self, port_name):
+
+        self.get_logger().info(
+            f'Inspecting {port_name}...'
+        )
+
+        try:
+            ser = serial.Serial(
+                port_name,
+                BAUD_RATE,
+                timeout=0.2
+            )
+
+        except serial.SerialException as e:
+
+            self.get_logger().error(
+                f'Could not open {port_name}: {e}'
+            )
+
+            return None
+
+        device_id = None
+
+        start_time = time.monotonic()
+
+        try:
+
+            while (
+                time.monotonic() - start_time
+                < LISTEN_TIME
+            ):
+
+                if ser.in_waiting == 0:
+                    continue
+
+                raw = ser.readline()
+
+                if not raw:
+                    continue
+
+                line = raw.decode(
+                    'utf-8',
+                    errors='ignore'
+                ).strip()
+
+                if not line:
+                    continue
+
+                self.get_logger().info(
+                    f'{port_name} → {line}'
+                )
+
+                # --------------------------------------
+                # Look for our discovery message
+                # --------------------------------------
+
+                if line.startswith('DEVICE_ID:'):
+
+                    device_id = line.split(
+                        ':',
+                        1
+                    )[1].strip()
+
+                    self.get_logger().info(
+                        f'DISCOVERED: '
+                        f'{device_id} '
+                        f'on {port_name}'
+                    )
+
+                    break
+
+        finally:
+
+            ser.close()
+
+        return device_id
+
+    # --------------------------------------------------
+    # Complete discovery process
+    # --------------------------------------------------
+
+    def discover_devices(self):
+
+        candidates = self.find_candidate_ports()
+
+        if not candidates:
+
+            self.get_logger().warn(
+                'No matching USB devices found.'
+            )
+
+            return
+
+        self.get_logger().info(
+            f'Found {len(candidates)} '
+            f'candidate USB device(s).'
+        )
+
+        discovered = []
+
+        for port_name in candidates:
+
+            device_id = self.inspect_device(
+                port_name
+            )
+
+            if device_id:
+
+                discovered.append(
+                    (device_id, port_name)
+                )
+
+        # --------------------------------------------------
+        # Discovery summary
+        # --------------------------------------------------
+
+        self.get_logger().info(
+            '========== DISCOVERY RESULT =========='
+        )
+
+        if not discovered:
+
+            self.get_logger().warn(
+                'No devices announced a DEVICE_ID.'
+            )
+
+        else:
+
+            for device_id, port_name in discovered:
+
+                self.get_logger().info(
+                    f'  {device_id} '
+                    f'→ {port_name}'
+                )
+
+        self.get_logger().info(
+            '======================================'
+        )
+
+
+def main(args=None):
+
+    rclpy.init(args=args)
+
+    node = DeviceDiscoveryNode()
+
+    try:
+        rclpy.spin(node)
+
+    except KeyboardInterrupt:
+        pass
+
+    finally:
+
+        node.get_logger().info(
+            'Shutting down'
+        )
+
+        node.destroy_node()
+
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
