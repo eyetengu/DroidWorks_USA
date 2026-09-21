@@ -1,0 +1,57 @@
+/*
+  Droid Works USA
+  EEPROM Device Information Writer
+
+  EID format:
+  DWUSA-PP-TT-XX
+
+  This example:
+  EID:    DWUSA-01-01-01
+  TYPE:   MOTION
+  SENSOR: PIR
+*/
+
+#include <EEPROM.h>
+
+const int EEPROM_START = 0;
+
+// Device information
+const char EID[]    = "DWUSA-01-01-01";
+const char TYPE[]   = "MOTION";
+const char SENSOR[] = "PIR";
+
+// EEPROM layout
+const int EID_ADDR    = 0;
+const int TYPE_ADDR   = 32;
+const int SENSOR_ADDR = 64;
+
+void writeString(int address, const char* data) {
+  for (int i = 0; i < strlen(data) + 1; i++) {
+    EEPROM.update(address + i, data[i]);
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  writeString(EID_ADDR, EID);
+  writeString(TYPE_ADDR, TYPE);
+  writeString(SENSOR_ADDR, SENSOR);
+
+  Serial.println("Device information written to EEPROM.");
+  Serial.println();
+
+  Serial.print("EID: ");
+  Serial.println(EID);
+
+  Serial.print("TYPE: ");
+  Serial.println(TYPE);
+
+  Serial.print("SENSOR: ");
+  Serial.println(SENSOR);
+}
+
+void loop() {
+  // Nothing to do
+}
