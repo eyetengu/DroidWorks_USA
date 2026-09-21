@@ -1,7 +1,6 @@
 # Lesson Set 01 — Basic Sensors (Individual)
 
 ## Topic List
-
 ### Sensor Topics
 
 * `/pir_state`
@@ -22,7 +21,6 @@
 ---
 
 ## Overview
-
 This is the foundation sensor set for Droid Works USA.
 
 In Lesson Set 01 you will build and test the individual sensor modules one at a time, give each physical device a persistent identity, discover the devices over USB, convert their raw serial output into clean ROS 2 topics, fuse related sensors, and create simple state nodes that the rest of the system can listen to.
@@ -51,62 +49,44 @@ These components form the basic sensor layer used by the rest of the Droid Works
 ---
 
 # Device Identity and Discovery
-
 Before the sensors are treated as ROS 2 devices, each physical module is given a persistent identity.
 
 The current EID format is:
-
-```text
-DWUSA-PP-TT-XX
-```
+ DWUSA-PP-TT-XX
 
 Where:
-
 * `DWUSA` = Droid Works USA
 * `PP` = project number
 * `TT` = device/type code
 * `XX` = individual unit number
 
 Each device also stores metadata:
-
-```text
-EID
-TYPE
-SENSOR
-```
+ EID
+ TYPE
+ SENSOR
 
 Example:
-
-```text
-EID:DWUSA-01-01-01
-TYPE:MOTION
-SENSOR:PIR
-```
+ EID:DWUSA-01-01-01
+ TYPE:MOTION
+ SENSOR:PIR
 
 The Raspberry Pi discovers candidate USB devices using their USB VID/PID, then communicates with each candidate and reads its EEPROM-based device announcement.
 
 This means ROS 2 does not need to depend on a fixed device such as:
-
-```text
-/dev/ttyUSB0
-/dev/ttyUSB1
-/dev/ttyUSB2
-```
+ /dev/ttyUSB0
+ /dev/ttyUSB1
+ /dev/ttyUSB2
 
 The operating system's USB port name can change.
-
 The device's EID does not.
-
 This establishes the basic discovery architecture used by the project.
 
 ---
 
 # PIR Sensor Module
-
 **Purpose:** Digital motion detection.
 
 The PIR module contains:
-
 * Arduino Nano
 * PIR sensor
 * EEPROM device identity
@@ -114,170 +94,123 @@ The PIR module contains:
 The Arduino reports motion state over serial.
 
 ROS 2 discovers the module using its device metadata and publishes:
-
-```text
-/pir_state
-```
+ /pir_state
 
 The PIR module establishes the basic pattern for the other sensor modules:
-
 **Sensor → Arduino → Serial → Device Discovery → ROS 2 Topic**
 
 ---
 
 # RCWL Sensor Module
-
 **Purpose:** Microwave/radar-style motion detection.
 
 The RCWL module contains:
-
 * Arduino Nano
 * RCWL-0516 sensor
 * EEPROM device identity
 
 The Arduino reports:
-
-```text
-rcwl:1
-rcwl:0
-```
+ rcwl:1
+ rcwl:0
 
 The ROS 2 entry node discovers the correct device using:
-
-```text
-TYPE=MOTION
-SENSOR=RCWL
-```
+ TYPE=MOTION
+ SENSOR=RCWL
 
 and publishes:
-
-```text
-/rcwl_state
-```
+ /rcwl_state
 
 This provides a second, physically different source of motion information.
 
 ---
 
 # Motion Fusion Node
-
 The Motion Fusion Node combines the two motion sensors:
-
-```text
-PIR
+ PIR
  +
-RCWL
+ RCWL
  ↓
-Motion Fusion
+ Motion Fusion
  ↓
-/fused_motion
-```
+ /fused_motion
 
 The purpose of fusion is to provide a higher-level motion signal without requiring downstream nodes to understand the individual sensors.
-
 The sensors remain independent.
-
 The fusion layer combines their information.
 
 ---
 
 # Ultrasonic Sensor Module
-
 **Purpose:** Distance measurement.
 
 The Ultrasonic module contains:
-
 * Arduino Nano
 * Ultrasonic distance sensor
 * EEPROM device identity
 
 The Arduino reports distance measurements over serial.
 
-The ROS 2 entry node:
-
+The ROS2 entry node:
 * Discovers the Ultrasonic device
 * Validates the incoming reading
 * Converts centimeters to millimeters
 * Publishes the result on:
-
-```text
-/ultrasonic_distance
-```
+    /ultrasonic_distance
 
 Distance is therefore standardized before entering the rest of the ROS 2 pipeline.
 
 ---
 
 # Time-of-Flight (ToF) Sensor Module
-
 **Purpose:** Short-range distance measurement.
 
 The ToF module contains:
-
 * Arduino Nano
 * ToF sensor
 * EEPROM device identity
 
 The ROS 2 entry node discovers the device using:
-
-```text
-TYPE=DISTANCE
-SENSOR=TOF
-```
+ TYPE=DISTANCE
+ SENSOR=TOF
 
 Invalid readings are filtered before being published.
-
 Valid measurements are published in millimeters on:
-
-```text
-/tof_distance
-```
+ /tof_distance
 
 This provides a second distance source that can be combined with the Ultrasonic sensor.
 
 ---
 
 # Distance Fusion Node
-
 The Distance Fusion Node combines the two distance sources:
-
-```text
-Ultrasonic
+ Ultrasonic
      +
     ToF
      ↓
-Distance Fusion
+ Distance Fusion
      ↓
-/fused_distance
-```
+ /fused_distance
 
 The purpose is to provide a cleaner distance signal to the rest of the system without requiring downstream modules to know which distance sensor produced the measurement.
 
 ---
 
 # State Nodes
-
 The state nodes sit above the fusion layer.
 
 ## Motion State Node
-
 Consumes the fused motion information and converts it into a simple, stable motion state.
-
 The purpose is to give higher-level modules a simple interface rather than requiring them to process raw PIR and RCWL information.
 
 ## Distance State Node
-
 Consumes the fused distance information and converts it into a simple, usable distance state.
-
 This creates a stable interface for higher-level modules.
 
 ---
 
 # The Resulting Architecture
-
 Lesson Set 01 establishes the following general pipeline:
 
-```text
                     ┌── PIR ──────────┐
                     │                 │
 Arduino + Sensor →  │                 ├── Motion Fusion ──→ Motion State
@@ -290,32 +223,27 @@ Arduino + Sensor →  │                 ├── Motion Fusion ──→ Moti
 Arduino + Sensor →  │                 ├── Distance Fusion ──→ Distance State
                     │                 │
                     └── ToF ──────────┘
-```
 
 Device discovery sits underneath the individual sensor pipelines:
 
-```text
-USB
+ USB
  ↓
-VID/PID
+ VID/PID
  ↓
-Candidate Device
+ Candidate Device
  ↓
-EEPROM Metadata
+ EEPROM Metadata
  ↓
-EID + TYPE + SENSOR
+ EID + TYPE + SENSOR
  ↓
-Correct ROS 2 Entry Node
-```
+ Correct ROS 2 Entry Node
 
 This separates **physical device identity** from the ROS 2 processing pipeline.
 
 ---
 
 # How to Work Through This Set
-
 Work through the modules in order.
-
 1. Build the PIR module.
 2. Write its EEPROM identity.
 3. Test the PIR Arduino sketch.
@@ -333,65 +261,48 @@ Work through the modules in order.
 15. Build and test the Distance State Node.
 
 Do not move to fusion until the individual sensor pipelines work.
-
 Do not move to the state layer until the fusion layer works.
 
 ---
 
 # Troubleshooting During the Lesson
-
 When changing a ROS 2 Python node, remember:
-
-```text
-Edit → Build → Source → Run
-```
+ Edit → Build → Source → Run
 
 For example:
-
-```bash
-cd ~/rpi_ws
-colcon build --packages-select droidworks_sensors
-source install/setup.bash
-```
+ cd ~/rpi_ws
+ colcon build --packages-select droidworks_sensors
+ source install/setup.bash
 
 Then run the node.
 
 ROS 2 may otherwise execute the previously installed version of the Python package.
-
 See the project's troubleshooting documentation for common build, installation, serial, and discovery problems.
 
 ---
 
 # What Lesson Set 01 Establishes
-
 When Lesson Set 01 is complete, Droid Works USA has a working modular sensor layer.
 
 The important separation is:
-
-```text
-Physical Sensors
+ Physical Sensors
       ↓
-Device Identity
+ Device Identity
       ↓
-Device Discovery
+ Device Discovery
       ↓
-Individual ROS 2 Topics
+ Individual ROS 2 Topics
       ↓
-Fusion
+ Fusion
       ↓
-State
+ State
       ↓
-Higher-Level Modules
-```
+ Higher-Level Modules
 
 Each layer has a specific job.
-
 The individual sensor nodes do not need to know what the OLED is doing.
-
 The OLED does not need to know which USB port the sensor is connected to.
-
 The state nodes do not need to know whether motion came from PIR, RCWL, or eventually another sensor array.
-
 That separation is intentional.
 
 ---
@@ -399,15 +310,10 @@ That separation is intentional.
 # Next Lesson Set
 
 ## Lesson Set 02 — OLED Display
-
 The OLED module will subscribe to the state information produced by Lesson Set 01.
-
 It does not need to directly understand the individual sensors.
-
 That keeps the display layer separate from the sensor layer.
 
 ## Lesson Set 03 — Sensor Arrays
-
 The sensor-array work will introduce multiple sensors and more complex physical arrangements.
-
 Because the individual sensor, fusion, and state layers are separated, the higher-level modules can continue using the same interfaces without requiring the entire system to be rewritten.
