@@ -6,6 +6,27 @@
     rcwl:1   → Motion detected
     rcwl:0   → No motion
 */
+#include <EEPROM.h>
+
+const int EID_ADDR    = 0;
+const int TYPE_ADDR   = 32;
+const int SENSOR_ADDR = 64;
+
+String readString(int address) {
+  String result = "";
+
+  for (int i = 0; i < 32; i++) {
+    char character = EEPROM.read(address + i);
+
+    if (character == '\0') {
+      break;
+    }
+
+    result += character;
+  }
+
+  return result;
+}
 
 const int motionPin = 2;      // RCWL OUT → D2
 const int ledPin = 13;        // Built-in LED
@@ -16,12 +37,26 @@ int previousState = 0;
 void setup() {
   pinMode(motionPin, INPUT);
   pinMode(ledPin, OUTPUT);
-  
-  Serial.begin(9600);
-  
-  // Optional: send a ready message once
+
+  Serial.begin(115200);
+
+  delay(2000);
+
+  String eid = readString(EID_ADDR);
+  String type = readString(TYPE_ADDR);
+  String sensor = readString(SENSOR_ADDR);
+
+  Serial.print("EID:");
+  Serial.print(eid);
+
+  Serial.print(",TYPE:");
+  Serial.print(type);
+
+  Serial.print(",SENSOR:");
+  Serial.println(sensor);
+
   Serial.println("rcwl_ready");
-  
+
   previousState = digitalRead(motionPin);
 }
 
