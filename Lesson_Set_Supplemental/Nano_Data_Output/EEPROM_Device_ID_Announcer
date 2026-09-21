@@ -1,6 +1,5 @@
-```cpp
 /*
-  Open Droid Lab — EEPROM Device ID Announcer
+  Droid Works USA — EEPROM Device ID Announcer
 
   Purpose:
     Read a device ID stored in EEPROM and announce it
@@ -10,7 +9,7 @@
 
     DEVICE_ID:M001
 
-  The ROS 2 device_discovery_node can listen for this
+  The ROS2 device_discovery_node can listen for this
   message during device discovery.
 */
 
@@ -66,4 +65,3 @@ void loop() {
 
   announceDeviceID();
 }
-```
