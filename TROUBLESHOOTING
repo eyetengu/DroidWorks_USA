@@ -1,0 +1,32 @@
+# Known Issues & Operational Notes
+
+==================================================
+## Disk Full / VS Code Remote-SSH Failures
+
+### Symptoms
+- SSH connection drops or is refused
+- VS Code Remote-SSH fails with:
+  - `Failed to parse remote port from server output`
+  - `Permission denied (publickey,password)` (sometimes secondary)
+- Pi becomes unresponsive or unstable
+
+### Root Cause
+Root filesystem fills to 100%. When free space hits zero, VS Code cannot install/start its server and other processes begin to fail.
+
+Primary space consumers observed:
+- `~/.ros/log` — grows without bound (ROS does not auto-prune logs)
+- `~/.arduino15` — Arduino IDE package and staging cache
+
+### Immediate Fix
+```bash
+# Clear ROS logs (safe)
+rm -rf ~/.ros/log/*
+
+# Clear Arduino staging cache (safe – will re-download if needed)
+rm -rf ~/.arduino15/staging/*
+
+# Verify free space
+df -h /
+
+==================================================
+
