@@ -1,4 +1,3 @@
-
 /*
   DroidWorks U.S.A. – ToF Sensor Module
   Lesson Set 01 | 02_ToF_sketch
@@ -9,6 +8,9 @@
     SDA → A4
     SCL → A5
 */
+
+#include <Wire.h>
+#include <Adafruit_VL53L0X.h>
 #include <EEPROM.h>
 
 const int EID_ADDR    = 0;
@@ -30,9 +32,6 @@ String readString(int address) {
 
   return result;
 }
-
-#include <Wire.h>
-#include <Adafruit_VL53L0X.h>
 
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 
