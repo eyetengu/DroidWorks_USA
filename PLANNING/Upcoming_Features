@@ -1,0 +1,83 @@
+# Upcoming Modules & Features
+**Droid Works USA**
+
+A living glossary of modules and capabilities planned for the project.  
+Focus is on reliability through direct serial links to the droid brain wherever practical.
+
+**Brain (current):** Raspberry Pi 500 (8 GB)  
+**Possible future brain:** Raspberry Pi 5 (16 GB) in compact case
+
+**Core philosophy:** Most sensor and actuator modules speak serial directly to the brain. This reduces wireless interference, dropped packets, and reconnection issues. The goal is near-continuous operability.
+
+---
+
+## Seriously Planned Modules
+
+These have concrete parts selected or clear functional intent and are expected to be built.
+
+### Droid Orientation Module
+- **MCU / Form:** Arduino Nano
+- **Sensors:** GY-521 (MPU-6050), tilt, shock
+- **Link:** Serial
+- **Purpose:** Orientation, balance awareness, fall/impact detection
+- **Note:** Keep fusion light on the Nano; send summarized orientation and event flags upstream.
+
+### Droid Ears & Mouth
+- **MCU / Form:** Arduino Nano
+- **Audio chain:**
+  - Microphone: MAX9814 (AGC electret)
+  - Amplifier: PAM8403 (Class-D, ~3 W)
+  - Playback: KB629 MP3 trigger board (SD/TF card)
+- **Link:** Serial
+- **Purpose:** Triggered sound effects / voice clips, basic voice-activity or loud-noise detection
+- **Note:** Let the KB629 handle decoding and file playback. The Nano only needs to issue simple serial commands and read basic mic levels. Keep power and ground clean to avoid motor noise in the audio path.
+
+### Droid Mobility Chassis
+- **MCU / Form:** Arduino Nano
+- **Components:** Relay(s), 12 V battery system, motor controller, dual drive motors
+- **Link:** Serial
+- **Purpose:** Locomotion and basic power switching for the drive system
+- **Note:** Prefer local closed-loop motor control on the chassis side. The brain should send high-level velocity / heading / stop commands rather than raw PWM.
+
+### Wireless Gateway (ESP32)
+- **Form:** ESP32
+- **Links:** Serial (to brain) + Wi-Fi / Bluetooth (external)
+- **Purpose:** OTA updates, telemetry, remote command injection, sharing droid status with a computer on the LAN
+- **Note:** Keep core droid functions independent of the gateway so the robot remains operable if the wireless side is offline or updating.
+
+---
+
+## Already in the Project (Reference)
+
+These exist or are actively used and form the foundation the upcoming modules will join.
+
+| Module                        | Hardware                          | Link     | Notes                          |
+|-------------------------------|-----------------------------------|----------|--------------------------------|
+| Individual Motion             | Nano + PIR                        | Serial   |                                |
+| Individual Motion             | Nano + RCWL                       | Serial   |                                |
+| Individual Distance           | Nano + Ultrasonic                 | Serial   |                                |
+| Individual Distance           | Nano + ToF                        | Serial   |                                |
+| Combined Motion               | Nano + PIR + RCWL                 | Serial   |                                |
+| Combined Distance             | Nano + Ultrasonic + ToF           | Serial   |                                |
+| Serial Display                | Nano + 0.96" OLED                 | Serial   |                                |
+| MQTT Display                  | ESP32 + 0.96" OLED                | MQTT     | Networked status display       |
+
+---
+
+## Under Consideration / Lower Priority
+
+Ideas that have been discussed but are not yet committed to specific hardware or timelines. They may move up as the core modules stabilize.
+
+- Power & battery management module (voltage, current, state-of-charge, low-battery handling)
+- Bump / contact / cliff sensors
+- Status indicator board (LEDs or small secondary display)
+- Environmental sensing (temperature, humidity, light, etc.)
+- Onboard logging (SD card or similar)
+- Camera / vision pipeline (later stage)
+
+---
+
+*This document will grow as modules move from idea → parts selected → implemented.*
+
+-----
+
