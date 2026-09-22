@@ -1,0 +1,75 @@
+Lesson Set 04 — Affect, Behavior & Orientation Awareness
+From sensors that report facts to a droid that has a coherent internal state
+Course Introduction Document  •  DroidWorks U.S.A.  •  September 2026
+1. Why Behavior Now
+Up to this point the platform has solid motion sensing (individual PIR and RCWL modules plus the dual fused array) and working display paths (Serial OLED and MQTT OLED). Those pieces answer “is something moving?” and “can I show state?”
+Lesson Set 04 is the moment we stop treating sensors as isolated reports and start treating them as inputs to a single, scalable behavior model. Even before every new sensor is wired, we can implement the first real “feeling” loop with the hardware we already have. Orientation, shock and tilt then become natural extensions of the same model rather than a separate topic.
+The goal is a rock-solid, teachable foundation that students (and future collaborators) can get behind and help grow.
+2. The Five Affective States
+The droid maintains one current affective level. Everything else (lights, OLED text, later sound and motion) reacts to that single value.
+Level	Name	What the droid is expressing
+0	NOMINAL	“I’m fine. Watching, but relaxed.” Soft idle display, low attention.
+1	NOTICING	“Hmm… that was different.” Brief attention cue on OLED / LEDs.
+2	INVESTIGATING	“I need a closer look.” Directed attention, higher sample rate, active display.
+3	CONCERNED	“This doesn’t feel right.” Warning pattern, caution messaging on OLED.
+4	PROTECTIVE	“Protecting core.” Strong alert / power-down sequence, non-critical loads reduced.
+Quiet time or explicit reset decays the state back toward NOMINAL. Hysteresis prevents flickering.
+3. The Five Layers (brief expansion)
+The architecture is intentionally layered so each piece can be taught, tested and upgraded independently.
+Layer 1 — Raw Hardware
+The physical sensors and actuators currently available or planned:
+⦁	Motion: PIR, RCWL-0516 (individual and dual/fused array already built)
+⦁	Distance: ultrasonic / ToF (combined distance sketch exists)
+⦁	Orientation & impact (this set): GY-521 / MPU-6050, shock/vibration switch, tilt switch
+⦁	Display: Serial OLED and MQTT OLED modules already working
+⦁	Later: audio (MAX9814 / electret, MAX98357, MP3 Trigger), environment (temp, humidity, gas, light), LEDs for room lighting
+Layer 2 — Individual Sensor Nodes
+Each sensor (or small group) publishes a clean, named ROS 2 topic. Existing examples:
+⦁	/pir_state, /rcwl_state, /fused_motion
+⦁	Coming: /orientation, /shock, /tilt, /distance, /audio_energy, etc.
+These nodes stay simple. They report facts; they do not decide how the droid feels.
+Layer 3 — Scoring & Fusion
+A lightweight scoring layer watches the sensor topics and produces a short-lived novelty / threat score. Rules include:
+⦁	Single short trigger → low score (Noticing territory)
+⦁	Sustained or multi-sensor confirmation → higher score
+⦁	Sudden shock or extreme tilt → immediate high score
+⦁	Hysteresis and decay timers keep the score from oscillating.
+Layer 4 — Affect State Machine
+One node owns the current affective level (0–4). It:
+⦁	Reads the fused score and any high-priority discrete events
+⦁	Applies transition rules and quiet-time decay
+⦁	Publishes a single authoritative topic, e.g. /droid_affect (level + short reason code)
+Layer 5 — Expression / Character
+Everything the human actually experiences lives here. Early implementation uses only what we already have:
+⦁	OLED (Serial or MQTT): show state name, short message, or simple icon pattern
+⦁	Optional status LEDs if present
+⦁	Later: audio phrases, head/eye motion, room lighting, locomotion posture
+Expression nodes subscribe only to /droid_affect. They never talk directly to the sensors. This keeps character changes cheap and consistent.
+4. First Working Behavior (using only current hardware)
+We do not wait for the GY-521 or audio path. The first concrete behavior can be built this week:
+1.	Inputs: existing /pir_state, /rcwl_state and /fused_motion topics (and any distance topic already publishing).
+2.	Scoring: simple rules — single short motion = Noticing; sustained or both PIR+RCWL = Investigating; prolonged or closing distance = Concerned.
+3.	State machine: one small ROS 2 node that owns the level and publishes /droid_affect.
+4.	Expression: Serial OLED and/or MQTT OLED show the current state name and a one-line reason. Optional status LED pattern if available.
+Once this loop is stable, adding orientation, shock and tilt is only a matter of feeding new scores into the same state machine. Audio and richer lighting become additional expression nodes. The foundation never has to be rewritten.
+5. Where Orientation, Shock & Tilt Fit
+The original Set 04 hardware (GY-521 + shock switch + tilt switch) now has a clear job:
+⦁	GY-521 supplies continuous orientation and acceleration for lean detection and smoother motion awareness.
+⦁	Shock switch gives clean, high-priority “bump / hit” events that can jump the state machine.
+⦁	Tilt switch gives a fast binary “I’m tipped” safety flag.
+They are not a separate topic; they are additional voters in Layer 3 that make the same five affective states more accurate and more interesting.
+6. Learning Outcomes for This Introduction
+After working through this conceptual layer a student should be able to:
+1.	Name the five affective states and describe what each one is trying to express.
+2.	Explain the five architectural layers and why sensor nodes do not directly drive LEDs or OLEDs.
+3.	Sketch a minimal scoring rule that turns existing motion topics into a state change.
+4.	Identify how the first OLED expression of /droid_affect can be implemented with modules already in hand.
+5.	See why orientation, shock and tilt are natural next inputs rather than a brand-new system.
+7. Recommended Next Steps
+1.	Lock the state names and topic (/droid_affect) so all future nodes share the same language.
+2.	Implement the first scoring + state-machine node using only the motion modules already working.
+3.	Wire the existing Serial and/or MQTT OLED to display the current affective level and a short reason string.
+4.	Document and film the Nominal → Noticing → Investigating loop as the first public teaching artifact of the behavior model.
+5.	Only then bring in GY-521 + shock + tilt as additional score sources, keeping the same state machine and expression path.
+This layered affect model is the difference between a collection of sensors and a droid that feels present. It stays fully modular, teachable, and compatible with the long-term goal of a sustainable, reproducible platform that can support both the builder and the community that grows around it.
+DroidWorks U.S.A.  •  Lesson Set 04 Introduction  •  Affect & Behavior Model v0.1
