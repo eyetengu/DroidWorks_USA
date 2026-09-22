@@ -1,123 +1,80 @@
-DroidWorks U.S.A. • Lesson Set 04
-Orientation, Shock & Tilt Awareness | Page 1
-Lesson Set 04 — Orientation, Shock & Tilt Awareness
-GY-521 (MPU-6050) + Vibration/Shock Switch + Tilt Switch on Arduino Nano
-Course Introduction Document • DroidWorks U.S.A.
-1. Purpose of This Lesson Set
-Up to this point the droid has learned to notice movement (PIR + RCWL) and measure distance
-(ultrasonic / ToF). Those sensors answer the question “Is something moving near me?” and “How far
-away is it?”
-Lesson Set 04 answers a different set of questions the droid needs in order to behave like a coherent
-character:
-• Which way am I oriented? (upright, leaning, tipped)
-• Am I accelerating or being moved?
-• Did something just hit or bump me hard?
-• Is my body currently tilted beyond a safe angle?
-These capabilities form the foundation for later head tracking, reactive “ouch” behaviors, safer
-movement, and richer fused state that can drive sound, lights, and motion.
-2. Sensor Roles in This Set
-Sensor What it provides Droid value
-GY-521 (MPU-6050) Continuous 3-axis acceleration + 3-axis
-gyroscope (orientation & motion)
-Head/body attitude, lean detection,
-smooth motion awareness
-Shock / vibration
-switch
-Discrete hard shock / impact events
-(digital pulse)
-Clean “bump / hit” triggers for sound or
-state changes
-Tilt switch Simple binary orientation (upright vs
-tilted)
-Fast “I’m tipped over” safety or character
-state
-The GY-521 (MPU-6050) supplies rich continuous data. The mechanical switches supply clean, low-
-effort discrete events. Together they create layered awareness without overloading a single sensor or
-the microcontroller.
-3. Feasibility on Arduino Nano
-Short answer: Yes — this combination is well within the Nano’s capabilities and is not
-overloaded.
-Resource picture:
-• GY-521 (MPU-6050): Uses only the I2C bus (A4/A5). Modest sampling rates (20–50 Hz) are
-light work.
-• Shock / vibration switch: Simple digital switch. One digital pin + INPUT_PULLUP (or module
-DO pin). Extremely low overhead.
-• Tilt switch: Pure digital input. Negligible cost.
-• The Nano still has ample pins, flash, and RAM left for millis-based timing, simple fusion, and
-serial output to the ROS 2 pipeline.
-Practical guidelines that keep the node reliable:
-DroidWorks U.S.A. • Lesson Set 04
-Orientation, Shock & Tilt Awareness | Page 2
-1. Debounce the mechanical switches (vibration switches in particular produce short, noisy
-pulses).
-2. Sample the IMU moderately (20–50 Hz is plenty for droid awareness). Avoid unnecessary
-high-rate streaming.
-3. Consider interrupts for the vibration switches if you want very responsive shock detection
-without constant polling.
-4. Mount carefully — vibration switch sensitivity depends heavily on placement and orientation on
-the chassis or dome.
-4. How This Fits the Overall Architecture
-Lesson Set 04 continues the same modular pattern established in Sets 01–03:
-• Individual sensor nodes first (or a combined MCU sketch that still treats each sensor cleanly)
-• Simple fusion into higher-level state
-• Publication as ROS 2 topics that later nodes (OLED, sound, motion) can consume without
-rewriting earlier work
-Suggested topic direction (still evolving with the preferred naming style):
-• /imu/data or simplified /orientation_state + /accel_events
-• /shock_event
-• /tilt_state
-• /fused_awareness (optional higher-level combination of motion + orientation + shock)
-Because the earlier motion and ranging nodes remain independent, adding orientation awareness does
-not force rework of the PIR/RCWL or distance pipelines. This is intentional and supports the long-term
-goal of reusable, teachable modules.
-5. Parts Already on Hand
-This lesson set is designed around parts already available in the lab:
-• GY-521 (MPU-6050) modules
-• Shock / vibration switch
-• Tilt switch
-• Arduino Nano + terminal breakout (one working setup already assembled)
-• Additional Nano available for later audio work
-Future audio path (not part of this lesson set):
-• MAX98357 I2S amplifier + speaker
-• MP3 Trigger / voice playback module
-• MAX9814 / electret microphones (listening side)
-These audio components will support reaction sounds and character voice once the sensing layers
-(including this orientation set) are solid. They are deliberately kept out of the current lesson so the focus
-stays on clean sensor integration and state.
-The same millis-based sketch style used in the PIR/RCWL and combined distance sketches will be
-extended here so students see continuity rather than a completely new coding pattern.
-6. Learning Outcomes
-By the end of Lesson Set 04 a student should be able to:
-1. Wire and read a GY-521 (MPU-6050) on an Arduino Nano and extract useful
-orientation/acceleration information.
-DroidWorks U.S.A. • Lesson Set 04
-Orientation, Shock & Tilt Awareness | Page 3
-2. Add a shock/vibration switch and a tilt switch, handle debouncing, and treat them as clean
-digital events.
-3. Publish the resulting data in a form that fits the existing ROS 2 sensor pipeline.
-4. Explain why continuous IMU data and discrete mechanical switches are complementary rather
-than redundant.
-5. Design simple reactive behaviors (state change, later sound or motion) driven by orientation or
-shock events.
-7. Recommended Sequence
-Current priority order for the overall project:
-5. Clean up and solidify Lesson Sets 01–03 (motion, ranging, arrays) so the foundation is
-stable.
-6. Complete Lesson Set 04 (this orientation / shock / tilt work) on the Nano + GY-521 + switches.
-7. Only then move to the audio module (MAX98357 + MP3 Trigger + speaker path) so sound
-reactions have solid sensor events to respond to.
-This keeps each layer teachable and prevents the audio work from becoming a distraction while the
-core awareness sensors are still being refined.
-8. Next Steps After This Introduction
-This document is the conceptual and architectural introduction. Subsequent materials in the set will
-cover:
-• Detailed wiring and pin recommendations for the current Nano + GY-521 + switches setup
-• Reference sketches (millis style, matching previous lessons)
-• Basic fusion logic and example ROS 2 topic structure
-• Suggested experiments and failure modes to explore
-This layer of awareness is one of the most important steps toward a droid that feels present and
-reactive rather than simply a collection of independent sensors. It remains fully modular, teachable, and
-compatible with the long-term goal of a sustainable, reproducible droid platform.
-DroidWorks U.S.A. • Lesson Set 04 Introduction
-Quote
-Explain
+**Got it. Here’s the clean, visual breakdown.**
+
+### 1. The Five Affective States
+
+```
+Level 0  ───  NOMINAL
+             "I'm fine. Watching, but relaxed."
+             Soft idle lights • quiet • low attention
+
+Level 1  ───  NOTICING
+             "Hmm… that was different."
+             Brief attention flash • soft chirp • mild curiosity
+
+Level 2  ───  INVESTIGATING
+             "I need a closer look."
+             Directed lights/head • inquisitive sounds • active scanning
+
+Level 3  ───  CONCERNED
+             "This doesn’t feel right."
+             Warning colors/pulse • caution tones • defensive posture
+
+Level 4  ───  PROTECTIVE
+             "Shutting non-essentials. Protecting core."
+             Strong alert / power-down sequence • cut non-critical loads
+```
+
+Simple progression:
+
+```
+NOMINAL  →  NOTICING  →  INVESTIGATING  →  CONCERNED  →  PROTECTIVE
+   ↑                                                       |
+   └─────────────── quiet time / reset ────────────────────┘
+```
+
+---
+
+### 2. The Layers (from sensors up to what the droid does)
+
+```
+┌─────────────────────────────────────────────────────┐
+│  LAYER 5 – Expression / Character                   │
+│  LEDs • Audio (chirps, phrases) • Head/eye motion   │
+│  (what the human actually sees and hears)           │
+└──────────────────────▲──────────────────────────────┘
+                       │
+┌──────────────────────┴──────────────────────────────┐
+│  LAYER 4 – Affect State Machine                     │
+│  Decides current level (0–4) + reason               │
+│  Publishes /droid_affect                            │
+└──────────────────────▲──────────────────────────────┘
+                       │
+┌──────────────────────┴──────────────────────────────┐
+│  LAYER 3 – Scoring & Fusion                         │
+│  Combines sensors, applies rules, hysteresis,       │
+│  persistence, multi-sensor confirmation             │
+└──────────────────────▲──────────────────────────────┘
+                       │
+┌──────────────────────┴──────────────────────────────┐
+│  LAYER 2 – Individual Sensor Nodes                  │
+│  /pir_state  /rcwl_state  /fused_motion             │
+│  /orientation  /shock  /tilt  /distance  /audio…    │
+└──────────────────────▲──────────────────────────────┘
+                       │
+┌──────────────────────┴──────────────────────────────┐
+│  LAYER 1 – Raw Hardware                             │
+│  PIR • RCWL-0516 • GY-521 • Ultrasonic/ToF          │
+│  Shock • Tilt • Mics • Temp/Humid/Gas/Light • LEDs  │
+└─────────────────────────────────────────────────────┘
+```
+
+---
+
+### Quick mental picture
+
+Sensors (Layer 1) → clean topics (Layer 2) → scores and rules (Layer 3) → one clear feeling (Layer 4) → lights + sounds + movement that match the feeling (Layer 5).
+
+That’s the whole model in two lists.
+
+Want me to expand any single layer next (for example the scoring rules or the LED/audio expressions for each state)?
+
