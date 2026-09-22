@@ -78,3 +78,185 @@ That’s the whole model in two lists.
 
 Want me to expand any single layer next (for example the scoring rules or the LED/audio expressions for each state)?
 
+
+==================================================================================================================================================
+=======================================WORKFLOW===================================================================================================
+==================================================================================================================================================
+You’re not missing the point — the model (states + layers) is the skeleton.  
+What we still need is a **repeatable workflow** for inventing, testing, and locking the actual *behaviors* that live inside it.
+
+Here’s a practical, week-sized workflow that fits the current hardware and the project’s operating rhythm.
+
+---
+
+### Behavior Development Workflow (v0.1)
+
+**Goal of each cycle**  
+Produce one clear, testable behavior that can be demonstrated with the motion modules + OLED(s) already in hand, then documented as a public teaching piece.
+
+#### Step 1 — Pick one transition or one state expression
+Choose a single, small focus. Examples:
+- “What should Noticing look like on the OLED when PIR fires once?”
+- “How long does Investigating stay active before decaying?”
+- “What message and visual pattern does Concerned show when both PIR and RCWL stay high?”
+
+Do **not** try to design the whole character at once.
+
+#### Step 2 — Write the intended feeling in plain language
+One or two sentences only.  
+Example:  
+“When something moves near me for the first time, I briefly acknowledge it, then return to calm if nothing else happens.”
+
+This becomes the acceptance criterion.
+
+#### Step 3 — Map it to the layers
+- **Layer 3 (Scoring)**: What sensor evidence raises the score?  
+- **Layer 4 (State Machine)**: Which level does it land in, and under what timeout/decay?  
+- **Layer 5 (Expression)**: Exactly what appears on the Serial OLED and/or MQTT OLED (text, icon, flash pattern)?
+
+Keep the mapping written down in a short note or comment block.
+
+#### Step 4 — Implement the smallest possible version
+- Use existing `/pir_state`, `/rcwl_state`, `/fused_motion`.  
+- Hard-code the scoring rules and state transitions in one small ROS 2 node (or even a single Arduino sketch if you want pure MCU first).  
+- Drive only the OLED expression.  
+No new sensors yet.
+
+#### Step 5 — Live test with real stimuli
+Walk past the sensors.  
+Trigger short vs sustained motion.  
+Watch the OLED and note:
+- Does the state change feel right?
+- Is the timing too fast / too slow?
+- Does the message match the intended feeling?
+
+Adjust only the numbers and messages — leave the architecture alone.
+
+#### Step 6 — Capture the artifact
+- Short video or series of stills showing the transition.  
+- One-paragraph description + the exact scoring rules used.  
+- Optional: the sketch or node code snippet.
+
+This becomes the weekly public teaching piece.
+
+#### Step 7 — Lock or iterate
+If it feels solid → lock the rule set for that behavior and move to the next transition.  
+If not → change only the parameters or expression and re-test.  
+Never rewrite the five-layer structure.
+
+---
+
+### Suggested first three cycles (this week / next)
+
+1. **Noticing** – single short PIR or RCWL pulse → brief OLED acknowledgment → decay to Nominal.  
+2. **Investigating** – sustained or dual-sensor motion → longer OLED “looking” message + higher attention pattern.  
+3. **Quiet decay** – no motion for X seconds → return to Nominal with a soft “all clear” indication.
+
+Once those three feel right, the foundation is real and orientation/shock can be dropped in as additional score sources without redesigning anything.
+
+---
+
+This workflow keeps you from getting lost in the full model while still building exactly the character behaviors that make the droid feel alive.  
+
+Want me to turn the first cycle (Noticing) into a concrete task list with suggested OLED text and scoring numbers so you can start coding today?
+
+
+==================================================================================================================================================
+=======================================BEHAVIOR: NOTICING=========================================================================================
+==================================================================================================================================================
+
+**First Behavior Cycle: Noticing**  
+Concrete task list you can start today with the hardware already working.
+
+---
+
+### Goal
+A single short motion event (PIR **or** RCWL) makes the droid briefly acknowledge the change, then return to calm if nothing else happens.
+
+**Plain-language feeling**  
+“Something moved near me once. I noticed it. If it doesn’t continue, I’m fine again.”
+
+---
+
+### Acceptance Criteria
+- Short pulse → state changes to **Noticing** within ~200–300 ms.
+- OLED shows a clear, brief acknowledgment.
+- If no further motion arrives, state decays back to **Nominal** after a short quiet window.
+- Sustained or dual-sensor motion does **not** stay in Noticing (that belongs to Investigating later).
+
+---
+
+### Suggested Starting Numbers (tune later)
+
+| Parameter                    | Starting value      | Notes |
+|-----------------------------|---------------------|-------|
+| Motion pulse threshold      | Any rising edge     | Single true from PIR or RCWL |
+| Noticing entry delay        | 0 ms (immediate)    | Feels responsive |
+| Noticing hold / quiet timer | 2.5 – 3.5 seconds   | Long enough to read, short enough to feel temporary |
+| Decay to Nominal            | After quiet timer expires | No new motion during the window |
+| Score for single short pulse| +1 (or just “edge detected”) | Keep scoring dead simple for cycle 1 |
+
+---
+
+### OLED Expression Ideas (pick one or mix)
+
+**Serial OLED / MQTT OLED – recommended first version**
+- Line 1: `STATE: NOTICING`
+- Line 2: `motion detected`
+- Optional short flash or invert of the display for 300–400 ms on entry, then settle.
+
+**Even simpler alternative**
+- `* noticing *`
+- Then after decay: `nominal` or blank / soft idle message.
+
+Keep text short so it fits a 128×64 or 128×32 without scrolling.
+
+---
+
+### Implementation Task List
+
+1. **Confirm inputs**  
+   Make sure `/pir_state` and `/rcwl_state` (or the combined serial messages) are publishing cleanly.  
+   Note the exact message format you already use (true/false, 1/0, “MOTION”, etc.).
+
+2. **Create or extend a small state node / sketch**  
+   - Subscribe to (or read) the motion signals.  
+   - On a rising edge from either sensor → set `current_state = NOTICING` and start the quiet timer.  
+   - While in NOTICING, if the quiet timer expires with no new edges → set `current_state = NOMINAL`.  
+   - Ignore further logic for Investigating/Concerned for now.
+
+3. **Drive the OLED**  
+   - When state becomes NOTICING → write the acknowledgment text.  
+   - When state returns to NOMINAL → write the calm/idle text (or clear).  
+   - Do this on both Serial OLED and MQTT OLED if both are available; one is enough for the first test.
+
+4. **Add a simple debug print**  
+   Serial output of the current state name and the reason (“pir edge”, “rcwl edge”, “quiet timeout”) so you can watch the logic without staring only at the OLED.
+
+5. **Live test sequence**
+   - Resting → confirm Nominal on OLED.  
+   - Walk past once quickly → should jump to Noticing, show message, then decay.  
+   - Walk past and linger / trigger both sensors → still only Noticing for this cycle (we harden the distinction later).  
+   - Adjust the quiet timer until the “notice then relax” feeling feels natural.
+
+6. **Capture the artifact**
+   - 15–30 second video or 4–5 stills showing: idle → trigger → Noticing message → return to Nominal.  
+   - One short paragraph describing the rule set and the timer value you settled on.  
+   - Optional: the relevant code snippet or ROS topic names used.
+
+---
+
+### What “done” looks like for this cycle
+You can reliably trigger a short motion event and watch the droid acknowledge it on the OLED, then calmly return to Nominal.  
+That single, polished loop is the first public teaching piece of the behavior model.
+
+Once this feels solid, the next cycle (Investigating) only adds a second set of rules on top of the same state machine and OLED path.
+
+Ready to start coding, or do you want suggested pseudo-code / ROS 2 node skeleton for the state machine next?
+
+
+
+
+==================================================================================================================================================
+=======================================        ===================================================================================================
+==================================================================================================================================================
