@@ -1,109 +1,123 @@
-DroidWorks U.S.A. • Lesson Set 05
-Audio, Sound Awareness & Character Response | Page 1
-Lesson Set 05 — Audio, Sound Awareness & Character Response
-Listening + Playback Path for an R2-Style Droid
+DroidWorks U.S.A. • Lesson Set 04
+Orientation, Shock & Tilt Awareness | Page 1
+Lesson Set 04 — Orientation, Shock & Tilt Awareness
+GY-521 (MPU-6050) + Vibration/Shock Switch + Tilt Switch on Arduino Nano
 Course Introduction Document • DroidWorks U.S.A.
 1. Purpose of This Lesson Set
-Earlier lesson sets give the droid the ability to notice movement, measure distance, and understand its
-own orientation and impacts. Those capabilities answer “what is happening around me and to me?”
-Lesson Set 05 adds the voice of the character. It answers two complementary questions:
-• Can the droid hear something worth reacting to? (sound awareness)
-• Can the droid express itself with sound in response to sensor events? (character playback)
-For an R2-style platform this is high-value. Sound is one of the fastest ways to make a collection of
-sensors feel like a living character. It is also excellent teaching and content material — reactions are
-immediately visible and audible.
-2. Component Roles in This Set
-Component Role Droid value
-MAX9814 / Electret mic Sound input / listening Detect claps, voice energy, or ambient
-noise events
-MP3 Trigger / Voice
-Playback
-Triggered character sounds from
-SD/TF card
-R2-style beeps, reaction banks, short
-voice clips
-MAX98357 + speaker Clean amplified audio output (I2S) Proper volume and quality without a
-separate amp stage
-The listening side (mic) and the expression side (playback + amp) can be developed somewhat
-independently, then connected through the same state machine used by the earlier sensor sets.
-3. Two Practical Paths (Keep Them Modular)
-Path A — Simple triggered character sounds (recommended starting point)
-Use the MP3 Trigger / voice playback module driven by digital pins or simple serial commands from a
-Nano. Sensor events (shock, tilt, motion, later sound detection) select different sound banks. This path
-is fast to bring up, easy to teach, and immediately produces character.
-Path B — I2S amplified output (MAX98357)
-The MAX98357 is an I2S Class-D amplifier. It pairs most cleanly with an ESP32 (or ESP32-S3) rather
-than a classic Nano. Use this path when you want higher-quality continuous audio, streaming, or more
-advanced synthesis later. It is powerful but introduces a different MCU and I2S considerations, so it is
-best treated as a second stage after the simple trigger path is working.
-4. Feasibility & MCU Notes
-A classic Arduino Nano is fully capable of driving the MP3 Trigger module and reading a MAX9814 (or
-simple electret) via analog threshold or basic energy detection. That combination stays consistent with
-the millis-based sketches used in earlier sets.
-DroidWorks U.S.A. • Lesson Set 05
-Audio, Sound Awareness & Character Response | Page 2
-The MAX98357 I2S amplifier is better matched to an ESP32. Trying to force full I2S audio through a
-Nano is possible in limited cases but is generally more friction than it is worth for this project’s teaching
-goals. Keep the Nano path simple and reserve the ESP32 + MAX98357 for when higher-fidelity output
-is needed.
-Both paths can still publish events or status into the same ROS 2 pipeline so later nodes remain
-independent of which playback method is used.
-5. How This Fits the Overall Architecture
-Lesson Set 05 is an output and interaction layer. It should consume the fused state and discrete events
-already produced by Sets 01–04 rather than re-implementing sensing.
-Typical flow:
-• Sensor nodes publish motion, distance, orientation, shock, tilt, and (optionally) sound-energy
-events.
-• A lightweight state or behavior node decides which reaction is appropriate.
-• The audio node (or the MCU driving the MP3 Trigger / MAX98357) plays the corresponding
-sound.
-Suggested topic direction (still flexible):
-• /sound_event or /audio_energy (from the listening side)
-• /play_sound or /character_response (command topic for playback)
-• /audio_status (optional feedback that a sound finished or is playing)
-6. Parts Already on Hand
-This lesson set is designed around parts already available:
-• MAX9814 Electret Microphone amplifier
-• uxcell Electret Microphone (6×3.5 mm, 2-wire)
-• Voice Playback / MP3 Trigger module (SD/TF card)
-• MAX98357 I2S Class-D amplifier
-• Speaker board / small speaker
-• Arduino Nano (one available for the simple trigger path; second Nano or ESP32 for later I2S
-work)
-7. Prerequisites & Recommended Sequence
-Audio is deliberately placed after the core sensing layers so that reactions have solid events to respond
-to.
-Recommended order:
-1. Stabilize Lesson Sets 01–03 (motion, ranging, sensor arrays).
-2. Complete Lesson Set 04 (orientation, shock, tilt) so discrete “bump” and attitude events exist.
-3. Then begin Lesson Set 05 (this audio work), starting with the simple MP3 Trigger path before
-adding the MAX98357 I2S path.
-This order keeps each layer teachable and prevents audio from becoming a distraction while the
-awareness sensors are still being refined.
-8. Learning Outcomes
-By the end of Lesson Set 05 a student should be able to:
-DroidWorks U.S.A. • Lesson Set 05
-Audio, Sound Awareness & Character Response | Page 3
-1. Read a simple microphone (MAX9814 or electret) and produce a usable sound-energy or
-threshold event.
-2. Drive an MP3 Trigger / voice playback module from sensor or state events to produce character
-sounds.
-3. Understand when to stay with a Nano + trigger approach versus moving to ESP32 + MAX98357
-for higher-quality output.
-4. Wire sound reactions into the existing fused-state / ROS 2 pipeline without rewriting earlier
-sensor nodes.
-5. Design simple, reliable “sensor event → character sound” behaviors that make the droid feel
-responsive.
-9. Next Steps After This Introduction
+Up to this point the droid has learned to notice movement (PIR + RCWL) and measure distance
+(ultrasonic / ToF). Those sensors answer the question “Is something moving near me?” and “How far
+away is it?”
+Lesson Set 04 answers a different set of questions the droid needs in order to behave like a coherent
+character:
+• Which way am I oriented? (upright, leaning, tipped)
+• Am I accelerating or being moved?
+• Did something just hit or bump me hard?
+• Is my body currently tilted beyond a safe angle?
+These capabilities form the foundation for later head tracking, reactive “ouch” behaviors, safer
+movement, and richer fused state that can drive sound, lights, and motion.
+2. Sensor Roles in This Set
+Sensor What it provides Droid value
+GY-521 (MPU-6050) Continuous 3-axis acceleration + 3-axis
+gyroscope (orientation & motion)
+Head/body attitude, lean detection,
+smooth motion awareness
+Shock / vibration
+switch
+Discrete hard shock / impact events
+(digital pulse)
+Clean “bump / hit” triggers for sound or
+state changes
+Tilt switch Simple binary orientation (upright vs
+tilted)
+Fast “I’m tipped over” safety or character
+state
+The GY-521 (MPU-6050) supplies rich continuous data. The mechanical switches supply clean, low-
+effort discrete events. Together they create layered awareness without overloading a single sensor or
+the microcontroller.
+3. Feasibility on Arduino Nano
+Short answer: Yes — this combination is well within the Nano’s capabilities and is not
+overloaded.
+Resource picture:
+• GY-521 (MPU-6050): Uses only the I2C bus (A4/A5). Modest sampling rates (20–50 Hz) are
+light work.
+• Shock / vibration switch: Simple digital switch. One digital pin + INPUT_PULLUP (or module
+DO pin). Extremely low overhead.
+• Tilt switch: Pure digital input. Negligible cost.
+• The Nano still has ample pins, flash, and RAM left for millis-based timing, simple fusion, and
+serial output to the ROS 2 pipeline.
+Practical guidelines that keep the node reliable:
+DroidWorks U.S.A. • Lesson Set 04
+Orientation, Shock & Tilt Awareness | Page 2
+1. Debounce the mechanical switches (vibration switches in particular produce short, noisy
+pulses).
+2. Sample the IMU moderately (20–50 Hz is plenty for droid awareness). Avoid unnecessary
+high-rate streaming.
+3. Consider interrupts for the vibration switches if you want very responsive shock detection
+without constant polling.
+4. Mount carefully — vibration switch sensitivity depends heavily on placement and orientation on
+the chassis or dome.
+4. How This Fits the Overall Architecture
+Lesson Set 04 continues the same modular pattern established in Sets 01–03:
+• Individual sensor nodes first (or a combined MCU sketch that still treats each sensor cleanly)
+• Simple fusion into higher-level state
+• Publication as ROS 2 topics that later nodes (OLED, sound, motion) can consume without
+rewriting earlier work
+Suggested topic direction (still evolving with the preferred naming style):
+• /imu/data or simplified /orientation_state + /accel_events
+• /shock_event
+• /tilt_state
+• /fused_awareness (optional higher-level combination of motion + orientation + shock)
+Because the earlier motion and ranging nodes remain independent, adding orientation awareness does
+not force rework of the PIR/RCWL or distance pipelines. This is intentional and supports the long-term
+goal of reusable, teachable modules.
+5. Parts Already on Hand
+This lesson set is designed around parts already available in the lab:
+• GY-521 (MPU-6050) modules
+• Shock / vibration switch
+• Tilt switch
+• Arduino Nano + terminal breakout (one working setup already assembled)
+• Additional Nano available for later audio work
+Future audio path (not part of this lesson set):
+• MAX98357 I2S amplifier + speaker
+• MP3 Trigger / voice playback module
+• MAX9814 / electret microphones (listening side)
+These audio components will support reaction sounds and character voice once the sensing layers
+(including this orientation set) are solid. They are deliberately kept out of the current lesson so the focus
+stays on clean sensor integration and state.
+The same millis-based sketch style used in the PIR/RCWL and combined distance sketches will be
+extended here so students see continuity rather than a completely new coding pattern.
+6. Learning Outcomes
+By the end of Lesson Set 04 a student should be able to:
+1. Wire and read a GY-521 (MPU-6050) on an Arduino Nano and extract useful
+orientation/acceleration information.
+DroidWorks U.S.A. • Lesson Set 04
+Orientation, Shock & Tilt Awareness | Page 3
+2. Add a shock/vibration switch and a tilt switch, handle debouncing, and treat them as clean
+digital events.
+3. Publish the resulting data in a form that fits the existing ROS 2 sensor pipeline.
+4. Explain why continuous IMU data and discrete mechanical switches are complementary rather
+than redundant.
+5. Design simple reactive behaviors (state change, later sound or motion) driven by orientation or
+shock events.
+7. Recommended Sequence
+Current priority order for the overall project:
+5. Clean up and solidify Lesson Sets 01–03 (motion, ranging, arrays) so the foundation is
+stable.
+6. Complete Lesson Set 04 (this orientation / shock / tilt work) on the Nano + GY-521 + switches.
+7. Only then move to the audio module (MAX98357 + MP3 Trigger + speaker path) so sound
+reactions have solid sensor events to respond to.
+This keeps each layer teachable and prevents the audio work from becoming a distraction while the
+core awareness sensors are still being refined.
+8. Next Steps After This Introduction
 This document is the conceptual and architectural introduction. Subsequent materials in the set will
 cover:
-• Wiring and pin recommendations for the Nano + MP3 Trigger starting path
-• Basic microphone threshold / energy detection sketches
-• Triggering sound banks from existing shock, tilt, and motion events
-• Optional later path: ESP32 + MAX98357 I2S setup
-• Suggested sound design experiments and content-friendly demonstrations
-Sound turns a capable sensor platform into a character that people want to watch and interact with.
-Keeping the audio layer modular and sequenced after solid sensing work preserves the teachable,
-reproducible structure that supports both the droid itself and the longer-term sustainable teaching
-model.
-DroidWorks U.S.A. • Lesson Set 05 Introduction
+• Detailed wiring and pin recommendations for the current Nano + GY-521 + switches setup
+• Reference sketches (millis style, matching previous lessons)
+• Basic fusion logic and example ROS 2 topic structure
+• Suggested experiments and failure modes to explore
+This layer of awareness is one of the most important steps toward a droid that feels present and
+reactive rather than simply a collection of independent sensors. It remains fully modular, teachable, and
+compatible with the long-term goal of a sustainable, reproducible droid platform.
+DroidWorks U.S.A. • Lesson Set 04 Introduction
+Quote
+Explain
