@@ -1,8 +1,6 @@
 **Got it. Here’s the clean, visual breakdown.**
 
 ### 1. The Five Affective States
-
-```
 Level 0  ───  NOMINAL
              "I'm fine. Watching, but relaxed."
              Soft idle lights • quiet • low attention
@@ -22,21 +20,14 @@ Level 3  ───  CONCERNED
 Level 4  ───  PROTECTIVE
              "Shutting non-essentials. Protecting core."
              Strong alert / power-down sequence • cut non-critical loads
-```
 
 Simple progression:
-
-```
 NOMINAL  →  NOTICING  →  INVESTIGATING  →  CONCERNED  →  PROTECTIVE
    ↑                                                       |
    └─────────────── quiet time / reset ────────────────────┘
-```
-
 ---
 
 ### 2. The Layers (from sensors up to what the droid does)
-
-```
 ┌─────────────────────────────────────────────────────┐
 │  LAYER 5 – Expression / Character                   │
 │  LEDs • Audio (chirps, phrases) • Head/eye motion   │
@@ -66,14 +57,10 @@ NOMINAL  →  NOTICING  →  INVESTIGATING  →  CONCERNED  →  PROTECTIVE
 │  PIR • RCWL-0516 • GY-521 • Ultrasonic/ToF          │
 │  Shock • Tilt • Mics • Temp/Humid/Gas/Light • LEDs  │
 └─────────────────────────────────────────────────────┘
-```
-
 ---
 
 ### Quick mental picture
-
 Sensors (Layer 1) → clean topics (Layer 2) → scores and rules (Layer 3) → one clear feeling (Layer 4) → lights + sounds + movement that match the feeling (Layer 5).
-
 That’s the whole model in two lists.
 
 Want me to expand any single layer next (for example the scoring rules or the LED/audio expressions for each state)?
@@ -86,11 +73,9 @@ You’re not missing the point — the model (states + layers) is the skeleton.
 What we still need is a **repeatable workflow** for inventing, testing, and locking the actual *behaviors* that live inside it.
 
 Here’s a practical, week-sized workflow that fits the current hardware and the project’s operating rhythm.
-
 ---
 
 ### Behavior Development Workflow (v0.1)
-
 **Goal of each cycle**  
 Produce one clear, testable behavior that can be demonstrated with the motion modules + OLED(s) already in hand, then documented as a public teaching piece.
 
@@ -99,21 +84,18 @@ Choose a single, small focus. Examples:
 - “What should Noticing look like on the OLED when PIR fires once?”
 - “How long does Investigating stay active before decaying?”
 - “What message and visual pattern does Concerned show when both PIR and RCWL stay high?”
-
 Do **not** try to design the whole character at once.
 
 #### Step 2 — Write the intended feeling in plain language
 One or two sentences only.  
 Example:  
 “When something moves near me for the first time, I briefly acknowledge it, then return to calm if nothing else happens.”
-
 This becomes the acceptance criterion.
 
 #### Step 3 — Map it to the layers
 - **Layer 3 (Scoring)**: What sensor evidence raises the score?  
 - **Layer 4 (State Machine)**: Which level does it land in, and under what timeout/decay?  
 - **Layer 5 (Expression)**: Exactly what appears on the Serial OLED and/or MQTT OLED (text, icon, flash pattern)?
-
 Keep the mapping written down in a short note or comment block.
 
 #### Step 4 — Implement the smallest possible version
@@ -129,21 +111,18 @@ Watch the OLED and note:
 - Does the state change feel right?
 - Is the timing too fast / too slow?
 - Does the message match the intended feeling?
-
 Adjust only the numbers and messages — leave the architecture alone.
 
 #### Step 6 — Capture the artifact
 - Short video or series of stills showing the transition.  
 - One-paragraph description + the exact scoring rules used.  
 - Optional: the sketch or node code snippet.
-
 This becomes the weekly public teaching piece.
 
 #### Step 7 — Lock or iterate
 If it feels solid → lock the rule set for that behavior and move to the next transition.  
 If not → change only the parameters or expression and re-test.  
 Never rewrite the five-layer structure.
-
 ---
 
 ### Suggested first three cycles (this week / next)
@@ -151,13 +130,10 @@ Never rewrite the five-layer structure.
 1. **Noticing** – single short PIR or RCWL pulse → brief OLED acknowledgment → decay to Nominal.  
 2. **Investigating** – sustained or dual-sensor motion → longer OLED “looking” message + higher attention pattern.  
 3. **Quiet decay** – no motion for X seconds → return to Nominal with a soft “all clear” indication.
-
 Once those three feel right, the foundation is real and orientation/shock can be dropped in as additional score sources without redesigning anything.
-
 ---
 
 This workflow keeps you from getting lost in the full model while still building exactly the character behaviors that make the droid feel alive.  
-
 Want me to turn the first cycle (Noticing) into a concrete task list with suggested OLED text and scoring numbers so you can start coding today?
 
 
@@ -167,7 +143,6 @@ Want me to turn the first cycle (Noticing) into a concrete task list with sugges
 
 **First Behavior Cycle: Noticing**  
 Concrete task list you can start today with the hardware already working.
-
 ---
 
 ### Goal
@@ -175,7 +150,6 @@ A single short motion event (PIR **or** RCWL) makes the droid briefly acknowledg
 
 **Plain-language feeling**  
 “Something moved near me once. I noticed it. If it doesn’t continue, I’m fine again.”
-
 ---
 
 ### Acceptance Criteria
@@ -183,7 +157,6 @@ A single short motion event (PIR **or** RCWL) makes the droid briefly acknowledg
 - OLED shows a clear, brief acknowledgment.
 - If no further motion arrives, state decays back to **Nominal** after a short quiet window.
 - Sustained or dual-sensor motion does **not** stay in Noticing (that belongs to Investigating later).
-
 ---
 
 ### Suggested Starting Numbers (tune later)
@@ -195,7 +168,6 @@ A single short motion event (PIR **or** RCWL) makes the droid briefly acknowledg
 | Noticing hold / quiet timer | 2.5 – 3.5 seconds   | Long enough to read, short enough to feel temporary |
 | Decay to Nominal            | After quiet timer expires | No new motion during the window |
 | Score for single short pulse| +1 (or just “edge detected”) | Keep scoring dead simple for cycle 1 |
-
 ---
 
 ### OLED Expression Ideas (pick one or mix)
@@ -208,13 +180,10 @@ A single short motion event (PIR **or** RCWL) makes the droid briefly acknowledg
 **Even simpler alternative**
 - `* noticing *`
 - Then after decay: `nominal` or blank / soft idle message.
-
 Keep text short so it fits a 128×64 or 128×32 without scrolling.
-
 ---
 
 ### Implementation Task List
-
 1. **Confirm inputs**  
    Make sure `/pir_state` and `/rcwl_state` (or the combined serial messages) are publishing cleanly.  
    Note the exact message format you already use (true/false, 1/0, “MOTION”, etc.).
@@ -243,18 +212,14 @@ Keep text short so it fits a 128×64 or 128×32 without scrolling.
    - 15–30 second video or 4–5 stills showing: idle → trigger → Noticing message → return to Nominal.  
    - One short paragraph describing the rule set and the timer value you settled on.  
    - Optional: the relevant code snippet or ROS topic names used.
-
 ---
 
 ### What “done” looks like for this cycle
 You can reliably trigger a short motion event and watch the droid acknowledge it on the OLED, then calmly return to Nominal.  
 That single, polished loop is the first public teaching piece of the behavior model.
-
 Once this feels solid, the next cycle (Investigating) only adds a second set of rules on top of the same state machine and OLED path.
 
 Ready to start coding, or do you want suggested pseudo-code / ROS 2 node skeleton for the state machine next?
-
-
 
 
 ==================================================================================================================================================
