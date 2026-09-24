@@ -19,11 +19,13 @@ const int EEPROM_START = 0;
 const char EID[]    = "DWUSA-01-01-01";
 const char TYPE[]   = "MOTION";
 const char SENSOR[] = "PIR";
+const char SENSOR2[] = "NULL";
 
 // EEPROM layout
 const int EID_ADDR    = 0;
 const int TYPE_ADDR   = 32;
 const int SENSOR_ADDR = 64;
+const int SENSOR2_ADDR = 96;
 
 void writeString(int address, const char* data) {
   for (int i = 0; i < strlen(data) + 1; i++) {
@@ -38,6 +40,7 @@ void setup() {
   writeString(EID_ADDR, EID);
   writeString(TYPE_ADDR, TYPE);
   writeString(SENSOR_ADDR, SENSOR);
+  writeString(SENSOR2_ADDR, SENSOR2);
 
   Serial.println("Device information written to EEPROM.");
   Serial.println();
@@ -50,6 +53,9 @@ void setup() {
 
   Serial.print("SENSOR: ");
   Serial.println(SENSOR);
+
+  Serial.print("SENSOR2: ");
+  Serial.println(SENSOR2);
 }
 
 void loop() {
