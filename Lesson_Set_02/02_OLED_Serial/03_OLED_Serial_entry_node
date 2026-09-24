@@ -1,62 +1,107 @@
 #!/usr/bin/env python3
 """
-DroidWorks U.S.A. – OLED Serial Bridge
-Lesson Set 02
+Droid Works USA – OLED Serial Bridge
+Lesson Set 02 / 04
 
-Subscribes to Combined State topics and sends them over serial
-to an Arduino Nano + OLED display.
+Discovers the OLED device using EEPROM metadata.
+Subscribes to affect OLED topics and sends SUMMARY:/EXPR: over serial.
 """
 
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
+
 import serial
-import threading
+import serial.tools.list_ports
 import time
 
 
+VID = 6790
+PID = 29987
+BAUD_RATE = 115200
+
+
 class OledSerial(Node):
+
     def __init__(self):
         super().__init__('oled_serial')
 
-        # ---------- Serial settings ----------
-        self.declare_parameter('port', '/dev/ttyUSB4')      # change to your Nano port
-        self.declare_parameter('baudrate', 115200)
-        self.declare_parameter('send_rate_hz', 5.0)          # how often to push data
-
-        self.port = self.get_parameter('port').value
-        self.baudrate = self.get_parameter('baudrate').value
+        self.declare_parameter('send_rate_hz', 5.0)
         self.send_rate = self.get_parameter('send_rate_hz').value
 
         self.ser = None
-        self.running = True
+        self.current_summary = 'boot'
+        self.current_expression = 'CALM'
 
-        # Latest values from Combined State
-        self.current_summary = "Waiting for data..."
-        self.current_expression = "None"
+        # Match affect_state_node outputs
+        self.create_subscription(String, '/oled_summary', self.summary_callback, 10)
+        self.create_subscription(String, '/oled_expr', self.expression_callback, 10)
+        self.create_subscription(String, '/droid_affect', self.affect_callback, 10)
 
-        # ---------- ROS subscriptions ----------
-        self.create_subscription(String, 'situational_summary', self.summary_callback, 10)
-        self.create_subscription(String, 'expression_hint', self.expression_callback, 10)
+        self.get_logger().info('Searching for OLED device...')
+        self.discover_device()
 
-        # Open serial
-        self.open_serial()
+        if self.ser is not None:
+            period = 1.0 / max(self.send_rate, 1.0)
+            self.create_timer(period, self.send_to_display)
+            self.get_logger().info('OLED Serial bridge started')
+            self.get_logger().info('ROS in: /oled_summary  /oled_expr  /droid_affect')
 
-        # Timer to push data at a steady rate
-        period = 1.0 / self.send_rate
-        self.create_timer(period, self.send_to_display)
+    def discover_device(self):
+        ports = serial.tools.list_ports.comports()
 
-        self.get_logger().info('OLED Serial bridge started')
-        self.get_logger().info(f'Sending to {self.port} @ {self.baudrate} baud')
+        for port in ports:
+            if port.vid != VID or port.pid != PID:
+                continue
 
-    def open_serial(self):
-        try:
-            self.ser = serial.Serial(self.port, self.baudrate, timeout=1.0)
-            time.sleep(2.0)   # give the Nano time to reset after serial open
-            self.get_logger().info(f'Opened serial port: {self.port}')
-        except serial.SerialException as e:
-            self.get_logger().error(f'Failed to open serial port {self.port}: {e}')
-            self.ser = None
+            self.get_logger().info(f'Checking candidate: {port.device}')
+
+            try:
+                ser = serial.Serial(port.device, BAUD_RATE, timeout=0.5)
+                start_time = time.time()
+
+                while time.time() - start_time < 6:
+                    raw = ser.readline()
+                    if not raw:
+                        continue
+
+                    line = raw.decode('utf-8', errors='ignore').strip()
+                    if not line:
+                        continue
+
+                    if line.startswith('EID:'):
+                        self.get_logger().info(f'Device announcement: {line}')
+
+                        fields = line.split(',')
+                        eid = ''
+                        device_type = ''
+                        sensor = ''
+
+                        for field in fields:
+                            if field.startswith('EID:'):
+                                eid = field[4:].strip()
+                            elif field.startswith('TYPE:'):
+                                device_type = field[5:].strip()
+                            elif field.startswith('SENSOR2:'):
+                                pass  # ignore if present
+                            elif field.startswith('SENSOR:'):
+                                sensor = field[7:].strip()
+
+                        if device_type == 'DISPLAY' and sensor == 'OLED':
+                            self.ser = ser
+                            self.get_logger().info(
+                                f'OLED FOUND | EID={eid} | PORT={port.device}'
+                            )
+                            return
+
+                        break
+
+                ser.close()
+
+            except Exception as e:
+                self.get_logger().warn(f'Could not check {port.device}: {e}')
+
+        self.get_logger().error('No OLED device found.')
 
     def summary_callback(self, msg: String):
         self.current_summary = msg.data
@@ -64,32 +109,26 @@ class OledSerial(Node):
     def expression_callback(self, msg: String):
         self.current_expression = msg.data
 
+    def affect_callback(self, msg: String):
+        # "1:ALERT" → use name as expression fallback
+        if ':' in msg.data:
+            self.current_expression = msg.data.split(':', 1)[1].strip()
+
     def send_to_display(self):
         if self.ser is None or not self.ser.is_open:
             return
 
         try:
-            # Simple text protocol (same style as MQTT version)
-            line1 = f"SUMMARY:{self.current_summary}\n"
-            line2 = f"EXPR:{self.current_expression}\n"
-
+            line1 = f'SUMMARY:{self.current_summary}\n'
+            line2 = f'EXPR:{self.current_expression}\n'
             self.ser.write(line1.encode('utf-8'))
             self.ser.write(line2.encode('utf-8'))
             self.ser.flush()
-
         except Exception as e:
             self.get_logger().warn(f'Serial write error: {e}')
-            # Attempt to reopen on error
-            try:
-                if self.ser:
-                    self.ser.close()
-            except:
-                pass
-            self.open_serial()
 
     def destroy_node(self):
-        self.running = False
-        if self.ser and self.ser.is_open:
+        if self.ser is not None and self.ser.is_open:
             self.ser.close()
         super().destroy_node()
 
