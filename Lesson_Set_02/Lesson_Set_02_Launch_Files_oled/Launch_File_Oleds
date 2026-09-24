@@ -1,0 +1,22 @@
+# this launch file contains the following:
+## oled_mqtt
+## oled_serial
+
+from launch import LaunchDescription
+from launch_ros.actions import Node
+
+def generate_launch_description():
+    return LaunchDescription([
+        Node(
+            package='droidworks_display',
+            executable='oled_mqtt',
+            name='oled_mqtt',
+            output='screen'
+        ),
+        Node(
+            package='droidworks_display',
+            executable='oled_serial',
+            name='oled_serial',
+            output='screen'
+        ),
+    ])
