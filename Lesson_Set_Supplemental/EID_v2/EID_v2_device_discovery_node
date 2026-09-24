@@ -88,11 +88,12 @@ class DeviceDiscoveryNode(Node):
             elif field.startswith("TYPE:"):
                 device_type = field[5:]
 
+            elif field.startswith("SENSOR2:"):
+                sensor2 = field[8:]
+
             elif field.startswith("SENSOR:"):
                 sensor = field[7:]
 
-            elif field.startswith("SENSOR2:"):
-                sensor2 = field[8:]
 
         self.get_logger().info(
             f"DEVICE FOUND | "
