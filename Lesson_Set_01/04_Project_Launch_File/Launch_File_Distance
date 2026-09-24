@@ -1,0 +1,37 @@
+# this launch file contains the following:
+## ultrasonic_node
+## tof_node
+## distance_fusion
+## state_distance
+
+
+from launch import LaunchDescription
+from launch_ros.actions import Node
+
+def generate_launch_description():
+    return LaunchDescription([
+        Node(
+            package='droidworks_sensors',
+            executable='ultrasonic_node',
+            name='ultrasonic_node',
+            output='screen',
+        ),
+        Node(
+            package='droidworks_sensors',
+            executable='tof_node',
+            name='tof_node',
+            output='screen',
+        ),
+        Node(
+            package='droidworks_sensors',
+            executable='fusion_distance',
+            name='fusion_distance',
+            output='screen'
+        ),
+        Node(
+            package='droidworks_sensors',
+            executable='state_distance',
+            name='state_distance',
+            output='screen'
+        ),
+    ])
