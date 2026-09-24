@@ -52,7 +52,7 @@ void loop() {
   Serial.print(type);
 
   Serial.print(",SENSOR:");
-  Serial.println(sensor);
+  Serial.print(sensor);
 
   Serial.print(",SENSOR2:");
   Serial.println(sensor2);
