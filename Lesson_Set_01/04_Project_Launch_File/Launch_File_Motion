@@ -1,0 +1,37 @@
+# this launch file contains the following:
+## pir_node
+## rcwl_node
+## motion_fusion
+## state_motion
+
+
+from launch import LaunchDescription
+from launch_ros.actions import Node
+
+def generate_launch_description():
+    return LaunchDescription([
+        Node(
+            package='droidworks_sensors',
+            executable='pir_node',
+            name='pir_node',
+            output='screen',
+        ),
+        Node(
+            package='droidworks_sensors',
+            executable='rcwl_node',
+            name='rcwl_node',
+            output='screen',
+        ),
+        Node(
+            package='droidworks_sensors',
+            executable='fusion_motion',
+            name='fusion_motion',
+            output='screen',
+        ),        
+        Node(
+            package='droidworks_sensors',
+            executable='state_motion',
+            name='state_motion',
+            output='screen'
+        ),
+    ])
