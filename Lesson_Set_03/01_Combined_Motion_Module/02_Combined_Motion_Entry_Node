@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+/*
 DroidWorks U.S.A. — Combined Motion Entry Node
 Discovers the Nano by EEPROM identity, then publishes:
   /pir_state
@@ -10,7 +10,7 @@ MCU side:
   DW_003_PIR_RCWL_Nano_millis_SERIAL.ino
   Startup:  EID:...,TYPE:MOTION,SENSOR:PIR,SENSOR2:RCWL
   Data:     PIR:0 RCWL:1 FUSED:0
-"""
+*/
 
 import time
 import rclpy
@@ -28,7 +28,7 @@ DISCOVERY_TIMEOUT = 3.0   # seconds to wait for announcement on a candidate
 
 
 class DWSerialEntryNode(Node):
-    """Discovers the motion board by EID and publishes PIR / RCWL / fused."""
+    #Discovers the motion board by EID and publishes PIR / RCWL / fused.
 
     def __init__(self):
         super().__init__('dw_serial_entry_node')
