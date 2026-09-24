@@ -78,6 +78,7 @@ class DeviceDiscoveryNode(Node):
         eid = ""
         device_type = ""
         sensor = ""
+        sensor2 = ""
 
         for field in fields:
 
@@ -90,11 +91,15 @@ class DeviceDiscoveryNode(Node):
             elif field.startswith("SENSOR:"):
                 sensor = field[7:]
 
+            elif field.startswith("SENSOR2:):
+                sensor = field[8:]
+
         self.get_logger().info(
             f"DEVICE FOUND | "
             f"EID={eid} | "
             f"TYPE={device_type} | "
             f"SENSOR={sensor} | "
+            f"SENSOR2={sensor2} | "
             f"PORT={port}"
         )
 
