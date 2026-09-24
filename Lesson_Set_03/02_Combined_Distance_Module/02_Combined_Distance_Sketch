@@ -21,26 +21,48 @@
  *   "VL53L0X" by Pololu
  *
  * Serial: 115200 baud
- * Format: US:123 TOF:456 FUSED:123   (mm, -1 = invalid)
+ * Startup:  EID:DWUSA-01-02-01,TYPE:DISTANCE,SENSOR:US,SENSOR2:TOF
+ * Data:     US:123 TOF:456 FUSED:123   (mm, -1 = invalid)
  */
 
+#include <EEPROM.h>
 #include <Wire.h>
 #include <VL53L0X.h>
 
+// -------------------- Pins --------------------
 const uint8_t PIN_TRIG = 8;
 const uint8_t PIN_ECHO = 9;
 
+// -------------------- Timing --------------------
 const unsigned long BAUD = 115200;
 const unsigned long SAMPLE_INTERVAL_MS = 100;
 const unsigned long US_TIMEOUT_US = 25000UL;
 
-VL53L0X tof;
+// -------------------- EEPROM layout --------------------
+const int EID_ADDR     = 0;
+const int TYPE_ADDR    = 32;
+const int SENSOR_ADDR  = 64;
+const int SENSOR2_ADDR = 96;
 
+// -------------------- Objects / state --------------------
+VL53L0X tof;
 unsigned long lastSampleMs = 0;
 int16_t lastUsMm   = -1;
 int16_t lastTofMm  = -1;
 int16_t lastFusedMm = -1;
 
+// -------------------- EEPROM helpers --------------------
+String readString(int address) {
+  String result = "";
+  for (int i = 0; i < 32; i++) {
+    char c = EEPROM.read(address + i);
+    if (c == '\0') break;
+    result += c;
+  }
+  return result;
+}
+
+// -------------------- Sensor helpers --------------------
 int16_t readUltrasonicMm() {
   digitalWrite(PIN_TRIG, LOW);
   delayMicroseconds(2);
@@ -50,7 +72,6 @@ int16_t readUltrasonicMm() {
 
   unsigned long duration = pulseIn(PIN_ECHO, HIGH, US_TIMEOUT_US);
   if (duration == 0) return -1;
-
   return (int16_t)(duration * 0.1715f);
 }
 
@@ -67,6 +88,7 @@ int16_t fuseDistances(int16_t usMm, int16_t tofMm) {
   return -1;
 }
 
+// -------------------- Setup --------------------
 void setup() {
   pinMode(PIN_TRIG, OUTPUT);
   pinMode(PIN_ECHO, INPUT);
@@ -75,6 +97,22 @@ void setup() {
   Serial.begin(BAUD);
   while (!Serial && millis() < 2000) { ; }
 
+  // Read and announce identity
+  String eid     = readString(EID_ADDR);
+  String type    = readString(TYPE_ADDR);
+  String sensor  = readString(SENSOR_ADDR);
+  String sensor2 = readString(SENSOR2_ADDR);
+
+  Serial.print(F("EID:"));
+  Serial.print(eid);
+  Serial.print(F(",TYPE:"));
+  Serial.print(type);
+  Serial.print(F(",SENSOR:"));
+  Serial.print(sensor);
+  Serial.print(F(",SENSOR2:"));
+  Serial.println(sensor2);
+
+  // Sensor init
   Wire.begin();
   tof.setTimeout(500);
   if (!tof.init()) {
@@ -88,6 +126,7 @@ void setup() {
   Serial.println(F("Format: US:xxx TOF:yyy FUSED:zzz"));
 }
 
+// -------------------- Loop --------------------
 void loop() {
   unsigned long now = millis();
   if (now - lastSampleMs < SAMPLE_INTERVAL_MS) return;
@@ -105,8 +144,8 @@ void loop() {
     Serial.print(F(" FUSED:"));
     Serial.println(fused);
 
-    lastUsMm = usMm;
-    lastTofMm = tofMm;
+    lastUsMm    = usMm;
+    lastTofMm   = tofMm;
     lastFusedMm = fused;
   }
 }
