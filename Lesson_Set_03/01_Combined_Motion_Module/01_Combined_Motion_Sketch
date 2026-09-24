@@ -1,6 +1,6 @@
 /*
  * DW_003_PIR_RCWL_Nano_millis_SERIAL.ino
- * DroidWorks U.S.A. — Lesson Set 03
+ * DroidWorks U.S.A. — Combined Motion Sketch
  * Single Arduino Nano + PIR + RCWL-0516
  *
  * Pinout (classic Nano):
@@ -9,58 +9,81 @@
  *   Both sensors: VIN/VCC → 5V, GND → GND
  *
  * Serial: 115200 baud
- * Production line format (one line per update, space-separated):
- *   PIR:0 RCWL:1 FUSED:0
+ * Startup:  EID:DWUSA-01-01-01,TYPE:MOTION,SENSOR:PIR,SENSOR2:RCWL
+ * Data:     PIR:0 RCWL:1 FUSED:0
  *
- * FUSED logic (easy to change later):
- *   1 if either sensor is high (OR) – good for “any motion”
- *   Change to AND if you want stricter confirmation.
- *
- * Design rules:
- *   - millis() only, no delay() in the main loop
- *   - State change detection so we don’t spam the serial line
- *   - Clean startup banner for Serial Monitor debugging
- *   - Ready for the ROS2 serial reader pattern
+ * FUSED logic: OR (any motion). Change to && for stricter confirmation.
  */
 
+#include <EEPROM.h>
+
+// -------------------- Pins --------------------
 const uint8_t PIN_PIR  = 2;
 const uint8_t PIN_RCWL = 3;
 
+// -------------------- Timing --------------------
 const unsigned long BAUD = 115200;
-const unsigned long PRINT_INTERVAL_MS = 100;   // how often we re-check & print on change
+const unsigned long PRINT_INTERVAL_MS = 100;
 
-bool lastPir  = false;
-bool lastRcwl = false;
+// -------------------- EEPROM layout --------------------
+const int EID_ADDR     = 0;
+const int TYPE_ADDR    = 32;
+const int SENSOR_ADDR  = 64;
+const int SENSOR2_ADDR = 96;
+
+// -------------------- State --------------------
+bool lastPir   = false;
+bool lastRcwl  = false;
 bool lastFused = false;
-
 unsigned long lastPrintMs = 0;
 
+// -------------------- EEPROM helpers --------------------
+String readString(int address) {
+  String result = "";
+  for (int i = 0; i < 32; i++) {
+    char c = EEPROM.read(address + i);
+    if (c == '\0') break;
+    result += c;
+  }
+  return result;
+}
+
+// -------------------- Setup --------------------
 void setup() {
   pinMode(PIN_PIR,  INPUT);
   pinMode(PIN_RCWL, INPUT);
 
   Serial.begin(BAUD);
-  while (!Serial && millis() < 2000) {
-    ; // wait briefly for USB serial on Nano
-  }
+  while (!Serial && millis() < 2000) { ; }
 
-  Serial.println();
+  // Read and announce identity
+  String eid     = readString(EID_ADDR);
+  String type    = readString(TYPE_ADDR);
+  String sensor  = readString(SENSOR_ADDR);
+  String sensor2 = readString(SENSOR2_ADDR);
+
+  Serial.print(F("EID:"));
+  Serial.print(eid);
+  Serial.print(F(",TYPE:"));
+  Serial.print(type);
+  Serial.print(F(",SENSOR:"));
+  Serial.print(sensor);
+  Serial.print(F(",SENSOR2:"));
+  Serial.println(sensor2);
+
   Serial.println(F("DW_003 PIR+RCWL Nano ready"));
   Serial.println(F("Format: PIR:x RCWL:y FUSED:z"));
   Serial.println(F("--------------------------------"));
 }
 
+// -------------------- Loop --------------------
 void loop() {
   unsigned long now = millis();
 
-  // Read current states
   bool pir  = digitalRead(PIN_PIR)  == HIGH;
   bool rcwl = digitalRead(PIN_RCWL) == HIGH;
+  bool fused = pir || rcwl;          // OR logic – change to && if desired
 
-  // Fused = OR (any motion). Change to && for AND logic.
-  bool fused = pir || rcwl;
-
-  // Only print when something changed or on a slow heartbeat
   bool changed = (pir != lastPir) || (rcwl != lastRcwl) || (fused != lastFused);
 
   if (changed || (now - lastPrintMs >= PRINT_INTERVAL_MS)) {
@@ -76,6 +99,4 @@ void loop() {
     lastFused = fused;
     lastPrintMs = now;
   }
-
-  // No delay() – loop stays free for future inserts (OLED, more sensors, etc.)
 }
