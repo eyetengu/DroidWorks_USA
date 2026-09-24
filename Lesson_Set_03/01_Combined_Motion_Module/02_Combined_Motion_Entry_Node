@@ -1,26 +1,18 @@
 #!/usr/bin/env python3
 """
-DroidWorks U.S.A. — Lesson Set 03 Entry Node
-Serial reader for the dual-sensor Nano sketch
+DroidWorks U.S.A. — Combined Motion Entry Node
+Discovers the Nano by EEPROM identity, then publishes:
+  /pir_state
+  /rcwl_state
+  /fused_motion
 
 MCU side:
   DW_003_PIR_RCWL_Nano_millis_SERIAL.ino
-  115200 baud
-  Line format:  PIR:0 RCWL:1 FUSED:0
-
-This node:
-  - Opens the serial port from the Nano
-  - Parses the three tokens
-  - Publishes:
-      /pir_state     (std_msgs/Bool)
-      /rcwl_state    (std_msgs/Bool)
-      /fused_motion  (std_msgs/Bool)
-
-Dependencies (once in the ROS 2 environment):
-  pip install pyserial
-  (or declare in package.xml / setup.py later)
+  Startup:  EID:...,TYPE:MOTION,SENSOR:PIR,SENSOR2:RCWL
+  Data:     PIR:0 RCWL:1 FUSED:0
 """
 
+import time
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Bool
@@ -28,53 +20,94 @@ from std_msgs.msg import Bool
 import serial
 import serial.tools.list_ports
 
-
-# ====================== SERIAL CONFIG (edit for your machine) ======================
-SERIAL_PORT = '/dev/ttyUSB0'   # Linux common; try /dev/ttyACM0 if needed
-BAUD_RATE   = 115200
-# ==================================================================================
+# Common CH340 / Nano USB identifiers
+VID = 6790
+PID = 29987
+BAUD_RATE = 115200
+DISCOVERY_TIMEOUT = 3.0   # seconds to wait for announcement on a candidate
 
 
 class DWSerialEntryNode(Node):
-    """DroidWorks Lesson Set 03 — serial entry node for PIR + RCWL + fused."""
+    """Discovers the motion board by EID and publishes PIR / RCWL / fused."""
 
     def __init__(self):
         super().__init__('dw_serial_entry_node')
 
-        # --- Publishers (one per preferred topic) ---
-        self.pub_pir    = self.create_publisher(Bool, '/pir_state', 10)
-        self.pub_rcwl   = self.create_publisher(Bool, '/rcwl_state', 10)
-        self.pub_fused  = self.create_publisher(Bool, '/fused_motion', 10)
+        self.pub_pir   = self.create_publisher(Bool, '/pir_state', 10)
+        self.pub_rcwl  = self.create_publisher(Bool, '/rcwl_state', 10)
+        self.pub_fused = self.create_publisher(Bool, '/fused_motion', 10)
 
-        # --- Serial open ---
         self.ser = None
-        self._open_serial()
+        self.eid = None
 
-        # Poll serial at ~20 Hz — plenty for motion edges
+        self._discover_motion_board()
+
         self.create_timer(0.05, self._serial_timer_callback)
 
-        self.get_logger().info('DroidWorks serial entry node ready')
+        self.get_logger().info('DroidWorks motion entry node ready')
         self.get_logger().info('Publishing: /pir_state  /rcwl_state  /fused_motion')
 
-    def _open_serial(self):
-        """Open the serial port. Fail gracefully so the node still starts."""
-        try:
-            self.ser = serial.Serial(
-                port=SERIAL_PORT,
-                baudrate=BAUD_RATE,
-                timeout=0.01,
-                write_timeout=0.5
-            )
-            self.get_logger().info(f'Serial opened: {SERIAL_PORT} @ {BAUD_RATE}')
-        except serial.SerialException as e:
-            self.get_logger().error(f'Could not open {SERIAL_PORT}: {e}')
-            self.get_logger().info('Available ports:')
-            for p in serial.tools.list_ports.comports():
-                self.get_logger().info(f'  {p.device} — {p.description}')
-            self.ser = None
+    def _discover_motion_board(self):
+        """Scan USB ports, look for TYPE=MOTION + SENSOR=PIR."""
+        self.get_logger().info('Searching for motion board...')
+
+        ports = serial.tools.list_ports.comports()
+
+        for port in ports:
+            if port.vid != VID or port.pid != PID:
+                continue
+
+            self.get_logger().info(f'Checking candidate: {port.device}')
+
+            try:
+                ser = serial.Serial(
+                    port.device,
+                    BAUD_RATE,
+                    timeout=0.5
+                )
+
+                start = time.time()
+                while time.time() - start < DISCOVERY_TIMEOUT:
+                    raw = ser.readline()
+                    if not raw:
+                        continue
+
+                    line = raw.decode('utf-8', errors='ignore').strip()
+                    if not line.startswith('EID:'):
+                        continue
+
+                    self.get_logger().info(f'Device announcement: {line}')
+
+                    # Parse key:value pairs
+                    fields = {}
+                    for part in line.split(','):
+                        if ':' in part:
+                            k, v = part.split(':', 1)
+                            fields[k] = v
+
+                    eid     = fields.get('EID', '')
+                    dtype   = fields.get('TYPE', '')
+                    sensor  = fields.get('SENSOR', '')
+                    sensor2 = fields.get('SENSOR2', '')
+
+                    if dtype == 'MOTION' and sensor == 'PIR':
+                        self.ser = ser
+                        self.eid = eid
+                        self.get_logger().info(
+                            f'MOTION BOARD FOUND | EID={eid} | '
+                            f'SENSOR={sensor}/{sensor2} | PORT={port.device}'
+                        )
+                        return
+
+                ser.close()
+
+            except serial.SerialException as e:
+                self.get_logger().warn(f'Could not open {port.device}: {e}')
+
+        self.get_logger().error('No matching motion board found.')
+        self.ser = None
 
     def _serial_timer_callback(self):
-        """Called by the timer. Read available lines and publish."""
         if self.ser is None or not self.ser.is_open:
             return
 
@@ -84,26 +117,19 @@ class DWSerialEntryNode(Node):
                 if not raw:
                     break
                 line = raw.decode('utf-8', errors='ignore').strip()
-                if not line:
-                    continue
-                self._handle_line(line)
+                if line:
+                    self._handle_line(line)
         except serial.SerialException as e:
             self.get_logger().error(f'Serial read error: {e}')
             self.ser = None
 
     def _handle_line(self, line: str):
-        """
-        Parse the production format from DW_003 sketch:
-            PIR:0 RCWL:1 FUSED:0
-        """
-        # Ignore startup banner / non-data lines
         if not line.startswith('PIR:'):
             self.get_logger().debug(f'MCU: {line}')
             return
 
         try:
             parts = line.split()
-            # Expect exactly three tokens: PIR:x  RCWL:y  FUSED:z
             if len(parts) != 3:
                 self.get_logger().warn(f'Unexpected token count: {line!r}')
                 return
@@ -112,21 +138,19 @@ class DWSerialEntryNode(Node):
             rcwl_val  = int(parts[1].split(':', 1)[1])
             fused_val = int(parts[2].split(':', 1)[1])
 
-            # Publish each topic
-            msg_pir = Bool()
-            msg_pir.data = bool(pir_val)
-            self.pub_pir.publish(msg_pir)
+            msg = Bool()
+            msg.data = bool(pir_val)
+            self.pub_pir.publish(msg)
 
-            msg_rcwl = Bool()
-            msg_rcwl.data = bool(rcwl_val)
-            self.pub_rcwl.publish(msg_rcwl)
+            msg.data = bool(rcwl_val)
+            self.pub_rcwl.publish(msg)
 
-            msg_fused = Bool()
-            msg_fused.data = bool(fused_val)
-            self.pub_fused.publish(msg_fused)
+            msg.data = bool(fused_val)
+            self.pub_fused.publish(msg)
 
+            eid_str = self.eid if self.eid else '----'
             self.get_logger().info(
-                f'Published  pir={msg_pir.data}  rcwl={msg_rcwl.data}  fused={msg_fused.data}'
+                f'[{eid_str}] pir={pir_val}  rcwl={rcwl_val}  fused={fused_val}'
             )
 
         except (ValueError, IndexError) as e:
