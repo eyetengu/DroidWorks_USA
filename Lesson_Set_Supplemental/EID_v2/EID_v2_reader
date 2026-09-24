@@ -57,7 +57,7 @@ void setup() {
   Serial.print("SENSOR: ");
   Serial.println(sensor);
 
-  Serial.print("SENSOR: ");
+  Serial.print("SENSOR2: ");
   Serial.println(sensor2);
 }
 
