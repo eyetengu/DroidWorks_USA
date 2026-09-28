@@ -1,0 +1,43 @@
+Cheap Yellow Display(CYD)
+esp32-2432s028 by guition model xh-32s
+
+=====================basic sketch=======================
+#include <TFT_eSPI.h>
+#include "dw_logo.h"
+
+TFT_eSPI tft = TFT_eSPI();
+
+void setup() {
+  tft.init();
+  tft.setRotation(3);          // landscape
+  tft.fillScreen(TFT_BLACK);
+
+  // Logo
+  int logoX = (320 - DW_LOGO_W) / 2;
+  tft.pushImage(logoX, 6, DW_LOGO_W, DW_LOGO_H, dw_logo);
+
+  // Title under logo
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString("Debug Surface", 160, 110, 2);
+
+  // Status block
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(TFT_GREEN, TFT_BLACK);
+  tft.drawString("Status: ONLINE", 12, 145, 2);
+
+  tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+  tft.drawString("Affect:     --", 12, 170, 2);
+  tft.drawString("Vigilance:  --", 12, 192, 2);
+
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.drawString("CYD forearm debug v0.1", 12, 225, 1);
+}
+
+void loop() {
+}
+=======================================================
+
+
+
+
