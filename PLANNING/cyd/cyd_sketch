@@ -1,0 +1,687 @@
+/*******************************************************************
+  DroidWorks USA - CYD Forearm Debug Surface  v0.3
+  ESP32-2432S028 (Cheap Yellow Display)
+
+  Multi-page operator display driven by MQTT status feed from
+  the ROS debug exit node (droidworks/debug/status).
+
+  Refresh model:
+    Full page redraw  every FULL_REFRESH_MS (or on page change)
+    Volatile fields   every VOLATILE_REFRESH_MS when data changed
+    Stops the whole-screen blink from 4 Hz MQTT updates.
+
+  Pages:
+    0  Overview      - logo, affect, vigilance, last events, data age
+    1  Affect Detail - state machine detail
+    2  Motion        - PIR / RCWL / fused presence
+    3  Orientation   - tilt / shock (placeholders until DW_005)
+    4  System        - health, uptime, packet stats
+
+  Touch (rotation 3 = left forearm):
+    tap left 1/3  = next page
+    tap right 1/3 = previous page
+    hold ~1s      = jump to Overview
+
+  Requires libraries (Library Manager):
+    - TFT_eSPI          (with CYD User_Setup.h)
+    - XPT2046_Touchscreen
+    - PubSubClient
+    - ArduinoJson
+
+  Also needs: dw_logo.h in the same folder
+
+  Board: ESP32 Dev Module
+ *******************************************************************/
+
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+#include <TFT_eSPI.h>
+#include <XPT2046_Touchscreen.h>
+#include <math.h>
+#include "dw_logo.h"
+
+// ===================== USER CONFIG =====================
+const char* WIFI_SSID     = "badap";
+const char* WIFI_PASSWORD = "EricLAN01!";
+
+// Pi running Mosquitto + dw_debug_exit_node (LAN IP)
+const char* MQTT_HOST     = "192.168.1.107";   // <-- set to your Pi IP
+const uint16_t MQTT_PORT  = 1883;
+const char* MQTT_TOPIC    = "droidworks/debug/status";
+const char* MQTT_CLIENT_ID = "cyd_debug_surface";
+
+// 1 = original landscape, 3 = left-forearm readable
+#define DISPLAY_ROTATION 3
+
+// How long without a packet before we show STALE / NO LINK
+#define LINK_STALE_MS  3000
+#define LINK_DEAD_MS   8000
+
+// Staged refresh (ms)  --- tune these if needed ---
+// Full = logo/header/labels (expensive, causes blink if too often)
+// Volatile = numbers/bars only, and ONLY when values actually change
+#define FULL_REFRESH_MS      30000   // full page redraw interval (30 s)
+#define VOLATILE_REFRESH_MS    500   // min gap between data-only redraws
+// =======================================================
+
+// -------------------- Touch (CYD XPT2046) --------------------
+#define XPT2046_IRQ  36
+#define XPT2046_MOSI 32
+#define XPT2046_MISO 39
+#define XPT2046_CLK  25
+#define XPT2046_CS   33
+
+SPIClass touchSPI = SPIClass(VSPI);
+XPT2046_Touchscreen ts(XPT2046_CS, XPT2046_IRQ);
+
+// -------------------- Display / network --------------------
+TFT_eSPI tft = TFT_eSPI();
+WiFiClient wifiClient;
+PubSubClient mqtt(wifiClient);
+
+// -------------------- Pages --------------------
+enum Page : uint8_t {
+  PAGE_OVERVIEW = 0,
+  PAGE_AFFECT,
+  PAGE_MOTION,
+  PAGE_ORIENTATION,
+  PAGE_SYSTEM,
+  PAGE_COUNT
+};
+
+const char* PAGE_NAMES[PAGE_COUNT] = {
+  "Overview",
+  "Affect",
+  "Motion",
+  "Orientation",
+  "System"
+};
+
+uint8_t currentPage = PAGE_OVERVIEW;
+bool    fullDirty   = true;   // full fillScreen + chrome
+bool    dataDirty   = false;  // volatile fields only
+
+uint32_t lastFullRedrawMs     = 0;
+uint32_t lastVolatileRedrawMs = 0;
+
+// -------------------- Live data --------------------
+struct DebugData {
+  char     affectState[16] = "CALM";
+  uint8_t  level           = 0;
+  uint8_t  vigilancePct    = 0;
+  uint16_t alertTimerSec   = 0;
+  uint16_t focusedTimerSec = 0;
+
+  bool pirActive   = false;
+  bool rcwlActive  = false;
+  bool fusedMotion = false;
+
+  bool  shockLatched = false;
+  bool  tiltActive   = false;
+  float tiltX        = 0.0f;
+  float tiltY        = 0.0f;
+
+  char     oledExpr[24] = "";
+  uint32_t lastPacketMs = 0;
+  uint32_t packetCount  = 0;
+  bool     linkUp       = false;
+} data;
+
+// -------------------- Touch helpers --------------------
+uint32_t touchDownMs    = 0;
+bool     touchWasDown   = false;
+int16_t  touchStartX    = 0;
+#define TOUCH_DEBOUNCE_MS  180
+uint32_t lastTouchNavMs = 0;
+
+#define TOUCH_X_MIN 200
+#define TOUCH_X_MAX 3700
+#define TOUCH_Y_MIN 240
+#define TOUCH_Y_MAX 3800
+
+bool readTouch(int16_t &x, int16_t &y) {
+  if (!ts.touched()) return false;
+  TS_Point p = ts.getPoint();
+  x = map(p.x, TOUCH_X_MIN, TOUCH_X_MAX, 0, 320);
+  y = map(p.y, TOUCH_Y_MIN, TOUCH_Y_MAX, 0, 240);
+  x = constrain(x, 0, 319);
+  y = constrain(y, 0, 239);
+  return true;
+}
+
+// -------------------- MQTT --------------------
+void applyStatusJson(const char* json) {
+  // Payload is small; 512 is plenty
+  StaticJsonDocument<512> doc;
+  DeserializationError err = deserializeJson(doc, json);
+  if (err) {
+    Serial.print("JSON error: ");
+    Serial.println(err.c_str());
+    return;
+  }
+
+  // Parse into locals first, then compare — only dirty UI if something changed
+  char newAffect[16];
+  const char* aff = doc["affect"] | "CALM";
+  strncpy(newAffect, aff, sizeof(newAffect) - 1);
+  newAffect[sizeof(newAffect) - 1] = '\0';
+
+  uint8_t newLevel = (uint8_t)(doc["level"] | 0);
+  uint8_t newVig   = (uint8_t)constrain((int)(doc["vigilance"] | 0), 0, 100);
+  bool newPir      = doc["pir"]   | false;
+  bool newRcwl     = doc["rcwl"]  | false;
+  bool newFused    = doc["fused"] | false;
+  bool newShock    = doc["shock"] | false;
+  bool newTilt     = doc["tilt"]  | false;
+  float newTiltX   = doc["tilt_x"] | 0.0f;
+  float newTiltY   = doc["tilt_y"] | 0.0f;
+
+  char newExpr[24];
+  const char* expr = doc["oled_expr"] | "";
+  strncpy(newExpr, expr, sizeof(newExpr) - 1);
+  newExpr[sizeof(newExpr) - 1] = '\0';
+
+  bool changed =
+      (strcmp(newAffect, data.affectState) != 0) ||
+      (newLevel != data.level) ||
+      (newVig   != data.vigilancePct) ||
+      (newPir   != data.pirActive) ||
+      (newRcwl  != data.rcwlActive) ||
+      (newFused != data.fusedMotion) ||
+      (newShock != data.shockLatched) ||
+      (newTilt  != data.tiltActive) ||
+      (fabsf(newTiltX - data.tiltX) > 0.05f) ||
+      (fabsf(newTiltY - data.tiltY) > 0.05f) ||
+      (strcmp(newExpr, data.oledExpr) != 0) ||
+      (!data.linkUp);
+
+  strncpy(data.affectState, newAffect, sizeof(data.affectState));
+  data.level        = newLevel;
+  data.vigilancePct = newVig;
+  data.pirActive    = newPir;
+  data.rcwlActive   = newRcwl;
+  data.fusedMotion  = newFused;
+  data.shockLatched = newShock;
+  data.tiltActive   = newTilt;
+  data.tiltX        = newTiltX;
+  data.tiltY        = newTiltY;
+  strncpy(data.oledExpr, newExpr, sizeof(data.oledExpr));
+
+  data.lastPacketMs = millis();
+  data.packetCount++;
+  data.linkUp = true;
+
+  // Only request a volatile redraw when values actually changed
+  if (changed) {
+    dataDirty = true;
+  }
+}
+
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  // Copy into a null-terminated buffer
+  char buf[512];
+  if (length >= sizeof(buf)) length = sizeof(buf) - 1;
+  memcpy(buf, payload, length);
+  buf[length] = '\0';
+
+  // Quiet by default — uncomment for debugging payloads
+  // Serial.print("MQTT ["); Serial.print(topic); Serial.print("] "); Serial.println(buf);
+
+  applyStatusJson(buf);
+}
+
+bool mqttReconnect() {
+  if (mqtt.connected()) return true;
+
+  Serial.print("MQTT connect...");
+  if (mqtt.connect(MQTT_CLIENT_ID)) {
+    Serial.println("ok");
+    mqtt.subscribe(MQTT_TOPIC);
+    return true;
+  }
+  Serial.print("fail rc=");
+  Serial.println(mqtt.state());
+  return false;
+}
+
+void ensureNetwork() {
+  if (WiFi.status() != WL_CONNECTED) {
+    if (data.linkUp) {
+      data.linkUp = false;
+      dataDirty = true;
+    }
+    static uint32_t lastAttempt = 0;
+    if (millis() - lastAttempt < 5000) return;
+    lastAttempt = millis();
+    Serial.println("WiFi reconnect...");
+    WiFi.disconnect();
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    return;
+  }
+
+  if (!mqtt.connected()) {
+    static uint32_t lastMqttTry = 0;
+    if (millis() - lastMqttTry < 3000) return;
+    lastMqttTry = millis();
+    mqttReconnect();
+  }
+}
+
+// -------------------- Drawing --------------------
+void drawHeader(const char* title) {
+  tft.fillRect(0, 0, 320, 22, TFT_NAVY);
+  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.setTextDatum(TL_DATUM);
+  tft.drawString("DW Debug", 6, 4, 2);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(title, 314, 4, 2);
+}
+
+void drawPageDots() {
+  const int baseX = 160 - ((PAGE_COUNT - 1) * 10);
+  const int y = 228;
+  for (uint8_t i = 0; i < PAGE_COUNT; i++) {
+    uint16_t color = (i == currentPage) ? TFT_CYAN : TFT_DARKGREY;
+    tft.fillCircle(baseX + i * 20, y, 4, color);
+  }
+}
+
+void drawDataAge() {
+  // Clear previous label then redraw (volatile region)
+  tft.fillRect(250, 24, 70, 12, TFT_BLACK);
+  uint32_t age = millis() - data.lastPacketMs;
+  tft.setTextDatum(TR_DATUM);
+  if (!data.linkUp || age > LINK_DEAD_MS) {
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+    tft.drawString("NO LINK", 314, 26, 1);
+  } else if (age > LINK_STALE_MS) {
+    tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+    tft.drawString("STALE", 314, 26, 1);
+  } else {
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    tft.drawString("LIVE", 314, 26, 1);
+  }
+}
+
+uint16_t affectColor(const char* state) {
+  if (strcasecmp(state, "CALM")    == 0) return TFT_CYAN;
+  if (strcasecmp(state, "ALERT")   == 0) return TFT_YELLOW;
+  if (strcasecmp(state, "FOCUSED") == 0) return TFT_GREEN;
+  if (strcasecmp(state, "WARY")    == 0) return TFT_ORANGE;
+  if (strcasecmp(state, "GUARDED") == 0) return TFT_RED;
+  return TFT_WHITE;
+}
+
+// Volatile regions for Overview (no full clear)
+void drawOverviewVolatile() {
+  drawDataAge();
+
+  // Affect state
+  tft.fillRect(40, 124, 240, 32, TFT_BLACK);
+  uint16_t ac = affectColor(data.affectState);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(ac, TFT_BLACK);
+  tft.drawString(data.affectState, 160, 140, 4);
+
+  // Vigilance bar (redraw track + fill)
+  int barX = 12, barY = 176, barW = 296, barH = 14;
+  tft.fillRect(barX, barY, barW, barH, TFT_BLACK);
+  tft.drawRect(barX, barY, barW, barH, TFT_DARKGREY);
+  int fillW = map(data.vigilancePct, 0, 100, 0, barW - 2);
+  uint16_t barColor = data.vigilancePct > 70 ? TFT_RED :
+                      data.vigilancePct > 40 ? TFT_ORANGE : TFT_GREEN;
+  if (fillW > 0) tft.fillRect(barX + 1, barY + 1, fillW, barH - 2, barColor);
+
+  // Status line
+  tft.fillRect(12, 198, 300, 14, TFT_BLACK);
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(TFT_SILVER, TFT_BLACK);
+  char buf[48];
+  snprintf(buf, sizeof(buf), "Shock:%s  Tilt:%s  Motion:%s",
+           data.shockLatched ? "YES" : "no",
+           data.tiltActive   ? "YES" : "no",
+           data.fusedMotion  ? "YES" : "no");
+  tft.drawString(buf, 12, 200, 1);
+}
+
+void drawOverview() {
+  drawHeader("Overview");
+  drawDataAge();
+
+  int logoX = (320 - DW_LOGO_W) / 2;
+  tft.pushImage(logoX, 30, DW_LOGO_W, DW_LOGO_H, dw_logo);
+
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString("Vigilance", 12, 160, 1);
+
+  drawOverviewVolatile();
+}
+
+void drawAffectVolatile() {
+  drawDataAge();
+
+  tft.fillRect(12, 54, 200, 36, TFT_BLACK);
+  uint16_t ac = affectColor(data.affectState);
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(ac, TFT_BLACK);
+  tft.drawString(data.affectState, 12, 58, 4);
+
+  char buf[32];
+  tft.fillRect(140, 108, 80, 40, TFT_BLACK);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  snprintf(buf, sizeof(buf), "%u", data.level);
+  tft.drawString(buf, 140, 110, 2);
+  snprintf(buf, sizeof(buf), "%u %%", data.vigilancePct);
+  tft.drawString(buf, 140, 135, 2);
+
+  tft.fillRect(100, 173, 200, 14, TFT_BLACK);
+  if (data.oledExpr[0]) {
+    tft.setTextColor(TFT_SILVER, TFT_BLACK);
+    tft.drawString(data.oledExpr, 100, 175, 1);
+  }
+}
+
+void drawAffect() {
+  drawHeader("Affect Detail");
+  drawDataAge();
+
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString("Current State", 12, 36, 2);
+
+  tft.setTextColor(TFT_SILVER, TFT_BLACK);
+  tft.drawString("Level", 12, 110, 2);
+  tft.drawString("Vigilance", 12, 135, 2);
+
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.drawString("OLED expr:", 12, 175, 1);
+  tft.drawString("Safety: Shock -> Wary -> Guarded", 12, 200, 1);
+
+  drawAffectVolatile();
+}
+
+void drawMotionVolatile() {
+  drawDataAge();
+
+  auto statusColor = [](bool active) -> uint16_t {
+    return active ? TFT_GREEN : TFT_DARKGREY;
+  };
+
+  tft.setTextDatum(TL_DATUM);
+  tft.fillRect(120, 48, 120, 90, TFT_BLACK);
+  tft.setTextColor(statusColor(data.pirActive), TFT_BLACK);
+  tft.drawString(data.pirActive ? "ACTIVE" : "idle", 120, 50, 2);
+  tft.setTextColor(statusColor(data.rcwlActive), TFT_BLACK);
+  tft.drawString(data.rcwlActive ? "ACTIVE" : "idle", 120, 85, 2);
+  tft.setTextColor(statusColor(data.fusedMotion), TFT_BLACK);
+  tft.drawString(data.fusedMotion ? "MOTION" : "clear", 120, 120, 2);
+}
+
+void drawMotion() {
+  drawHeader("Motion / Presence");
+  drawDataAge();
+
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(TFT_SILVER, TFT_BLACK);
+  tft.drawString("PIR", 12, 50, 2);
+  tft.drawString("RCWL", 12, 85, 2);
+  tft.drawString("Fused", 12, 120, 2);
+
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.drawString("Source: /pir_state  /rcwl_state  /fused_motion", 12, 180, 1);
+
+  drawMotionVolatile();
+}
+
+void drawOrientationVolatile() {
+  drawDataAge();
+
+  tft.setTextDatum(TL_DATUM);
+  tft.fillRect(120, 48, 120, 50, TFT_BLACK);
+  if (data.shockLatched) {
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+    tft.drawString("LATCHED", 120, 50, 2);
+  } else {
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    tft.drawString("clear", 120, 50, 2);
+  }
+  if (data.tiltActive) {
+    tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+    tft.drawString("ACTIVE", 120, 90, 2);
+  } else {
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    tft.drawString("level", 120, 90, 2);
+  }
+
+  char buf[40];
+  tft.fillRect(100, 138, 120, 30, TFT_BLACK);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  snprintf(buf, sizeof(buf), "%.1f deg", data.tiltX);
+  tft.drawString(buf, 100, 140, 1);
+  snprintf(buf, sizeof(buf), "%.1f deg", data.tiltY);
+  tft.drawString(buf, 100, 160, 1);
+}
+
+void drawOrientation() {
+  drawHeader("Orientation / Shock");
+  drawDataAge();
+
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(TFT_SILVER, TFT_BLACK);
+  tft.drawString("Shock", 12, 50, 2);
+  tft.drawString("Tilt", 12, 90, 2);
+  tft.drawString("Tilt X", 12, 140, 1);
+  tft.drawString("Tilt Y", 12, 160, 1);
+
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.drawString("Source: DW_005  /tilt  /shock  (pending)", 12, 200, 1);
+
+  drawOrientationVolatile();
+}
+
+void drawSystemVolatile() {
+  drawDataAge();
+
+  char buf[40];
+  tft.setTextDatum(TL_DATUM);
+  tft.fillRect(120, 38, 180, 120, TFT_BLACK);
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  snprintf(buf, sizeof(buf), "%lu s", millis() / 1000UL);
+  tft.drawString(buf, 120, 40, 1);
+  snprintf(buf, sizeof(buf), "%lu", data.packetCount);
+  tft.drawString(buf, 120, 58, 1);
+
+  tft.setTextColor(data.linkUp ? TFT_GREEN : TFT_RED, TFT_BLACK);
+  tft.drawString(data.linkUp ? "UP" : "DOWN", 120, 76, 1);
+
+  tft.setTextColor(WiFi.status() == WL_CONNECTED ? TFT_GREEN : TFT_RED, TFT_BLACK);
+  if (WiFi.status() == WL_CONNECTED) {
+    snprintf(buf, sizeof(buf), "%s", WiFi.localIP().toString().c_str());
+    tft.drawString(buf, 120, 94, 1);
+  } else {
+    tft.drawString("down", 120, 94, 1);
+  }
+
+  tft.setTextColor(mqtt.connected() ? TFT_GREEN : TFT_RED, TFT_BLACK);
+  tft.drawString(mqtt.connected() ? "connected" : "down", 120, 112, 1);
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  snprintf(buf, sizeof(buf), "%u bytes", ESP.getFreeHeap());
+  tft.drawString(buf, 120, 130, 1);
+  snprintf(buf, sizeof(buf), "%s (%u/%u)", PAGE_NAMES[currentPage], currentPage + 1, PAGE_COUNT);
+  tft.drawString(buf, 120, 148, 1);
+}
+
+void drawSystem() {
+  drawHeader("System");
+  drawDataAge();
+
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(TFT_SILVER, TFT_BLACK);
+  tft.drawString("Uptime", 12, 40, 1);
+  tft.drawString("Packets", 12, 58, 1);
+  tft.drawString("Link", 12, 76, 1);
+  tft.drawString("WiFi", 12, 94, 1);
+  tft.drawString("MQTT", 12, 112, 1);
+  tft.drawString("Free Heap", 12, 130, 1);
+  tft.drawString("Page", 12, 148, 1);
+
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.drawString("DroidWorks USA  -  CYD Debug Surface v0.3", 12, 200, 1);
+
+  drawSystemVolatile();
+}
+
+void drawCurrentPageFull() {
+  tft.fillScreen(TFT_BLACK);
+  switch (currentPage) {
+    case PAGE_OVERVIEW:    drawOverview();    break;
+    case PAGE_AFFECT:      drawAffect();      break;
+    case PAGE_MOTION:      drawMotion();      break;
+    case PAGE_ORIENTATION: drawOrientation(); break;
+    case PAGE_SYSTEM:      drawSystem();      break;
+  }
+  drawPageDots();
+  fullDirty = false;
+  dataDirty = false;
+  lastFullRedrawMs = millis();
+  lastVolatileRedrawMs = millis();
+}
+
+void drawCurrentPageVolatile() {
+  switch (currentPage) {
+    case PAGE_OVERVIEW:    drawOverviewVolatile();    break;
+    case PAGE_AFFECT:      drawAffectVolatile();      break;
+    case PAGE_MOTION:      drawMotionVolatile();      break;
+    case PAGE_ORIENTATION: drawOrientationVolatile(); break;
+    case PAGE_SYSTEM:      drawSystemVolatile();      break;
+  }
+  dataDirty = false;
+  lastVolatileRedrawMs = millis();
+}
+
+// -------------------- Navigation --------------------
+void nextPage() { currentPage = (currentPage + 1) % PAGE_COUNT; fullDirty = true; }
+void prevPage() { currentPage = (currentPage == 0) ? PAGE_COUNT - 1 : currentPage - 1; fullDirty = true; }
+void goHome()   { currentPage = PAGE_OVERVIEW; fullDirty = true; }
+
+// -------------------- Setup --------------------
+void setup() {
+  Serial.begin(115200);
+  delay(100);
+  Serial.println("\nDroidWorks CYD Debug Surface v0.3");
+
+  tft.init();
+  tft.setRotation(DISPLAY_ROTATION);
+  tft.fillScreen(TFT_BLACK);
+
+  touchSPI.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
+  ts.begin(touchSPI);
+  ts.setRotation(DISPLAY_ROTATION-2);
+
+  // Boot splash
+  int logoX = (320 - DW_LOGO_W) / 2;
+  int logoY = (240 - DW_LOGO_H) / 2 - 10;
+  tft.pushImage(logoX, logoY, DW_LOGO_W, DW_LOGO_H, dw_logo);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(TFT_SILVER, TFT_BLACK);
+  tft.drawString("Debug Surface v0.3", 160, logoY + DW_LOGO_H + 16, 2);
+  tft.drawString("connecting...", 160, logoY + DW_LOGO_H + 36, 1);
+
+  // WiFi
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("WiFi");
+  uint32_t wifiStart = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < 15000) {
+    delay(400);
+    Serial.print(".");
+  }
+  Serial.println();
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("IP ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("WiFi failed - will keep retrying");
+  }
+
+  // MQTT
+  mqtt.setServer(MQTT_HOST, MQTT_PORT);
+  mqtt.setCallback(mqttCallback);
+  mqtt.setBufferSize(512);
+  mqttReconnect();
+
+  fullDirty = true;
+}
+
+// -------------------- Loop --------------------
+void loop() {
+  ensureNetwork();
+  mqtt.loop();
+
+  // Mark link down if packets stop
+  if (data.linkUp && (millis() - data.lastPacketMs > LINK_DEAD_MS)) {
+    data.linkUp = false;
+    dataDirty = true;
+  }
+
+  // LIVE → STALE transition without waiting for a value change
+  static bool wasStale = false;
+  bool isStale = data.linkUp && (millis() - data.lastPacketMs > LINK_STALE_MS);
+  if (isStale != wasStale) {
+    wasStale = isStale;
+    dataDirty = true;
+  }
+
+  // Periodic full refresh (recovers any partial-draw glitches, rare)
+  if (millis() - lastFullRedrawMs >= FULL_REFRESH_MS) {
+    fullDirty = true;
+  }
+
+  // --- Touch navigation ---
+  int16_t tx, ty;
+  bool down = readTouch(tx, ty);
+
+  if (down && !touchWasDown) {
+    touchDownMs  = millis();
+    touchStartX  = tx;
+    touchWasDown = true;
+  } else if (!down && touchWasDown) {
+    uint32_t held = millis() - touchDownMs;
+    if (millis() - lastTouchNavMs > TOUCH_DEBOUNCE_MS) {
+      if (held > 900) {
+        goHome();
+        lastTouchNavMs = millis();
+      } else if (held < 500) {
+        if (touchStartX < 106) {
+#if DISPLAY_ROTATION == 3
+          nextPage();
+#else
+          prevPage();
+#endif
+          lastTouchNavMs = millis();
+        } else if (touchStartX > 214) {
+#if DISPLAY_ROTATION == 3
+          prevPage();
+#else
+          nextPage();
+#endif
+          lastTouchNavMs = millis();
+        }
+      }
+    }
+    touchWasDown = false;
+  }
+
+  // Draw: full takes priority; otherwise throttled volatile update
+  if (fullDirty) {
+    drawCurrentPageFull();
+  } else if (dataDirty && (millis() - lastVolatileRedrawMs >= VOLATILE_REFRESH_MS)) {
+    drawCurrentPageVolatile();
+  }
+
+  delay(20);
+}
