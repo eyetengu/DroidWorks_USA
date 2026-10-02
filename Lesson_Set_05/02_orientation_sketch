@@ -1,0 +1,174 @@
+/*
+ * DW_005_Orientation_Shock_Tilt_Nano_millis_SERIAL.ino
+ * DroidWorks U.S.A. — Lesson Set 04 (Orientation / Shock / Tilt)
+ * Single Arduino Nano + GY-521 (MPU-6050) + Tilt switch + Shock switch
+ *
+ * Pinout (classic Nano + terminal breakout):
+ *   GY-521:
+ *     VCC → 5V
+ *     GND → GND
+ *     SDA → A4
+ *     SCL → A5
+ *     AD0 → GND (address 0x68) or leave floating
+ *   Shock switch (3-pin):
+ *     VCC → 5V
+ *     GND → GND
+ *     Signal (S / DO) → D4
+ *   Tilt switch (3-pin):
+ *     VCC → 5V
+ *     GND → GND
+ *     Signal (S / DO) → D5
+ *
+ * Serial: 115200 baud
+ * Production line format (one line per update):
+ *   TILT:0 SHOCK:0 AX:0.02 AY:-0.01 AZ:0.98
+ *
+ * Notes:
+ *   - millis() only, no delay() in the main loop
+ *   - Debounce on both mechanical switches
+ *   - MPU-6050 read via Wire only (no external library required for bring-up)
+ *   - Shock and tilt polarity: many Elegoo-style modules go LOW when active.
+ *     The sketch treats LOW as active (1). Flip the logic if your modules are inverted.
+ *   - Ready for the ROS 2 serial reader pattern later
+ */
+
+#include <Wire.h>
+
+// ---- Pins ----
+const uint8_t PIN_SHOCK = 4;
+const uint8_t PIN_TILT  = 5;
+
+// ---- MPU-6050 ----
+const uint8_t MPU_ADDR = 0x68;          // AD0 low / floating
+const unsigned long IMU_INTERVAL_MS = 40;  // ~25 Hz
+
+// ---- Switch debounce ----
+const unsigned long DEBOUNCE_MS = 25;
+
+// ---- Serial ----
+const unsigned long BAUD = 115200;
+const unsigned long PRINT_INTERVAL_MS = 100;  // heartbeat / change print
+
+// ---- State ----
+bool lastTilt   = false;
+bool lastShock  = false;
+bool stableTilt = false;
+bool stableShock = false;
+
+unsigned long lastTiltChangeMs  = 0;
+unsigned long lastShockChangeMs = 0;
+unsigned long lastImuMs         = 0;
+unsigned long lastPrintMs       = 0;
+
+float ax = 0.0f, ay = 0.0f, az = 0.0f;
+
+// ---- Helpers ----
+void mpuWrite(uint8_t reg, uint8_t data) {
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(reg);
+  Wire.write(data);
+  Wire.endTransmission();
+}
+
+bool mpuReadAccel(float &x, float &y, float &z) {
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x3B);                     // ACCEL_XOUT_H
+  if (Wire.endTransmission(false) != 0) return false;
+
+  if (Wire.requestFrom(MPU_ADDR, (uint8_t)6) != 6) return false;
+
+  int16_t rawX = (Wire.read() << 8) | Wire.read();
+  int16_t rawY = (Wire.read() << 8) | Wire.read();
+  int16_t rawZ = (Wire.read() << 8) | Wire.read();
+
+  // ±2g full-scale default → 16384 LSB/g
+  const float scale = 16384.0f;
+  x = rawX / scale;
+  y = rawY / scale;
+  z = rawZ / scale;
+  return true;
+}
+
+void setup() {
+  pinMode(PIN_SHOCK, INPUT_PULLUP);
+  pinMode(PIN_TILT,  INPUT_PULLUP);
+
+  Wire.begin();
+  Wire.setClock(400000);                // 400 kHz I2C
+
+  // Wake MPU-6050 (exit sleep)
+  mpuWrite(0x6B, 0x00);                 // PWR_MGMT_1
+  delay(50);                            // one-time settle only
+
+  // Optional: set accel range to ±2g (default) and sample rate
+  // mpuWrite(0x1C, 0x00);              // ACCEL_CONFIG ±2g
+  // mpuWrite(0x19, 0x07);              // SMPLRT_DIV ~1 kHz / 8
+
+  Serial.begin(BAUD);
+  while (!Serial && millis() < 2000) {
+    ; // wait briefly for USB serial on Nano
+  }
+
+  Serial.println();
+  Serial.println(F("DW_005 Orientation+Shock+Tilt Nano ready"));
+  Serial.println(F("Format: TILT:x SHOCK:y AX:a AY:b AZ:c"));
+  Serial.println(F("----------------------------------------"));
+}
+
+void loop() {
+  unsigned long now = millis();
+
+  // ---- Read switches (active LOW on most Elegoo modules) ----
+  bool rawTilt  = (digitalRead(PIN_TILT)  == LOW);
+  bool rawShock = (digitalRead(PIN_SHOCK) == LOW);
+
+  // Debounce tilt
+  if (rawTilt != lastTilt) {
+    lastTiltChangeMs = now;
+    lastTilt = rawTilt;
+  }
+  if ((now - lastTiltChangeMs) >= DEBOUNCE_MS) {
+    stableTilt = lastTilt;
+  }
+
+  // Debounce shock
+  if (rawShock != lastShock) {
+    lastShockChangeMs = now;
+    lastShock = rawShock;
+  }
+  if ((now - lastShockChangeMs) >= DEBOUNCE_MS) {
+    stableShock = lastShock;
+  }
+
+  // ---- Read IMU at modest rate ----
+  if (now - lastImuMs >= IMU_INTERVAL_MS) {
+    lastImuMs = now;
+    if (!mpuReadAccel(ax, ay, az)) {
+      // Keep previous values on read failure; do not spam
+    }
+  }
+
+  // ---- Print on change or heartbeat ----
+  static bool lastPrintedTilt  = false;
+  static bool lastPrintedShock = false;
+  bool changed = (stableTilt != lastPrintedTilt) || (stableShock != lastPrintedShock);
+
+  if (changed || (now - lastPrintMs >= PRINT_INTERVAL_MS)) {
+    Serial.print(F("TILT:"));
+    Serial.print(stableTilt ? 1 : 0);
+    Serial.print(F(" SHOCK:"));
+    Serial.print(stableShock ? 1 : 0);
+    Serial.print(F(" AX:"));
+    Serial.print(ax, 2);
+    Serial.print(F(" AY:"));
+    Serial.print(ay, 2);
+    Serial.print(F(" AZ:"));
+    Serial.println(az, 2);
+
+    lastPrintedTilt  = stableTilt;
+    lastPrintedShock = stableShock;
+    lastPrintMs = now;
+  }
+
+  // No delay() — loop stays free
+}
