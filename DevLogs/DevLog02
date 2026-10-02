@@ -1,0 +1,434 @@
+# DroidWorks U.S.A.
+
+## Droid #01 — Integrated Bringup r01
+
+**Date:** October 2, 2026
+**Status:** Operational baseline
+
+---
+
+## Overview
+
+Droid #01 has reached its first fully integrated system baseline.
+
+The individual hardware, sensor, processing, expression, and debug components that had previously been tested independently are now brought up through a single ROS 2 launch file:
+
+```text
+droid01_bringup_r01.launch.py
+```
+
+This launch configuration represents the current known-good configuration of Droid #01 and establishes **r01** as the first integrated bringup baseline.
+
+The system can now be started with a single command rather than manually launching each component.
+
+---
+
+## System Architecture
+
+The current Droid #01 architecture is:
+
+```text
+                         DROID #01
+                             │
+                     Raspberry Pi 5
+                         ROS 2
+                             │
+                  Hardware Manager
+                             │
+                    Device Discovery
+                             │
+             ┌───────────────┴───────────────┐
+             │                               │
+       Hardware Entry                   Display Hardware
+             │                               │
+     ┌───────┼────────┐                     OLED
+     │       │        │
+    PIR     RCWL   Distance
+                     │   │
+                    ToF Ultrasonic
+                     │
+                Orientation
+                     │
+             State / Fusion
+              ┌──────┴──────┐
+              │             │
+        Motion Fusion   Orientation State
+              │             │
+              └──────┬──────┘
+                     │
+                  Behavior
+                     │
+              behavior_combined_01
+                     │
+             ┌───────┴────────┐
+             │                │
+          OLED             CYD
+        Expression      Debug/Operator
+```
+
+---
+
+## Hardware Discovery
+
+Hardware discovery is centralized in the **Hardware Manager**.
+
+The manager scans candidate USB serial devices, resets the attached MCUs, requests their EEPROM identity, and builds the device map.
+
+During the r01 bringup, all six physical devices were successfully discovered:
+
+| Device      | EID              | Type        | Sensor         | Assigned Port  |
+| ----------- | ---------------- | ----------- | -------------- | -------------- |
+| OLED        | `DWUSA-02-01-01` | DISPLAY     | OLED           | `/dev/ttyUSB0` |
+| Orientation | `DWUSA-05-01-01` | ORIENTATION | GY-521 / SHOCK | `/dev/ttyUSB5` |
+| ToF         | `DWUSA-01-03-01` | DISTANCE    | TOF            | `/dev/ttyUSB4` |
+| Ultrasonic  | `DWUSA-01-04-01` | DISTANCE    | ULTRASONIC     | `/dev/ttyUSB3` |
+| PIR         | `DWUSA-01-01-01` | MOTION      | PIR            | `/dev/ttyUSB2` |
+| RCWL        | `DWUSA-01-02-01` | MOTION      | RCWL           | `/dev/ttyUSB1` |
+
+The important architectural result is that the individual sensor nodes do **not** independently scan the USB hub.
+
+Instead:
+
+```text
+Hardware Manager
+      │
+      │ /hardware/device_map
+      ▼
+Sensor Entry Nodes
+```
+
+The entry nodes wait for their assignment and then open the specific port provided by the Hardware Manager.
+
+This preserves the Hardware Manager as the single hardware-discovery authority.
+
+---
+
+## Hardware Entry Layer
+
+The current hardware entry layer consists of:
+
+```text
+pir_node
+rcwl_node
+tof_node
+ultrasonic_node
+orientation_entry
+```
+
+These nodes provide the interface between the physical MCUs and the ROS 2 processing layer.
+
+The orientation hardware is deliberately separated from its interpreted state:
+
+```text
+orientation_entry
+        │
+        ├── orientation_x
+        ├── orientation_y
+        ├── tilt_state
+        └── shock_state
+                │
+                ▼
+        orientation_state
+```
+
+This naming convention distinguishes the hardware/interface layer from the higher-level state interpretation.
+
+---
+
+## State and Fusion
+
+The current processing layer includes:
+
+```text
+fusion_motion
+orientation_state
+```
+
+`fusion_motion` combines the motion-related sensor information into a unified motion representation.
+
+`orientation_state` interprets the orientation information from the physical droid and determines its current orientation state.
+
+The orientation system uses hysteresis so that the state does not rapidly oscillate around the tilt threshold.
+
+Current thresholds:
+
+```text
+Tilt entry: 15°
+Tilt exit:  10°
+```
+
+---
+
+## Behavior
+
+The current behavior/affect node is:
+
+```text
+behavior_combined_01
+```
+
+Although the name originated during development rather than from a formal naming scheme, it is currently the canonical executable name for the behavior layer and is intentionally retained for r01.
+
+The behavior system receives the processed sensor state and determines the droid's current affective state.
+
+The currently demonstrated states include:
+
+```text
+CALM
+ALERT
+FOCUSED
+```
+
+The affect state drives the droid's expression system.
+
+---
+
+## OLED Expression
+
+The OLED is the droid's primary physical expression surface.
+
+The OLED bridge receives the droid's current expression and drives the physical display.
+
+During the r01 integrated test:
+
+```text
+behavior
+    ↓
+affect state
+    ↓
+OLED expression
+```
+
+was verified to operate as part of the complete system.
+
+The OLED is therefore no longer being treated as an isolated display test. It is now part of the droid's integrated behavioral response.
+
+---
+
+## CYD Debug / Operator Surface
+
+The ESP32 CYD display has evolved into a significant component of the development architecture.
+
+It is not intended to replace the droid's onboard expression.
+
+Instead, it provides an external view into the droid's internal state.
+
+The current conceptual distinction is:
+
+```text
+OLED
+    = What the droid expresses outwardly
+
+CYD
+    = What the developer/operator can see internally
+```
+
+During the r01 test, the CYD successfully displayed information corresponding to the droid's behavior.
+
+Physical testing demonstrated:
+
+* Moving around the droid affected motion information.
+* Changes in distance affected the displayed distance information.
+* Moving/tilting the physical droid affected orientation information.
+* The OLED responded to the resulting behavioral state.
+* The CYD reflected the corresponding internal state wirelessly.
+
+This establishes the CYD as a functional **debug and operator surface**, rather than simply an external display.
+
+---
+
+## Complete Bringup
+
+The complete system is now launched through:
+
+```text
+droid01_bringup_r01.launch.py
+```
+
+The launch sequence intentionally starts the system in stages:
+
+```text
+Hardware Manager
+       ↓
+Sensor Entry Nodes
+       ↓
+Fusion / Orientation
+       ↓
+Behavior
+       ↓
+OLED Expression
+       ↓
+CYD Debug Surface
+```
+
+The staged startup gives the Hardware Manager an opportunity to discover the physical devices before the hardware entry nodes attempt to establish their serial connections.
+
+The system was successfully launched without the serial-port conflicts encountered during earlier development.
+
+---
+
+## Verification
+
+The integrated system was physically tested after launching through the new master bringup file.
+
+The following behaviors were verified:
+
+### Motion
+
+Physical movement around the droid produced corresponding motion activity in the ROS system and on the CYD.
+
+### Distance
+
+Objects placed within the sensing range produced corresponding distance information on the CYD.
+
+### Orientation
+
+Moving and tilting the physical droid produced corresponding orientation changes on the CYD.
+
+### Expression
+
+The OLED changed its expression in response to the droid's behavioral state.
+
+### Wireless Debugging
+
+The CYD successfully received the droid's internal information through the existing MQTT path.
+
+### Complete Startup
+
+All six hardware devices were discovered by the Hardware Manager, assigned to their appropriate entry nodes, and brought into the ROS system through the single r01 launch configuration.
+
+---
+
+## Current Node Architecture
+
+The current known-good Droid #01 architecture is:
+
+```text
+DROID #01
+│
+├── Hardware Manager
+│
+├── Hardware Entry
+│   ├── pir_node
+│   ├── rcwl_node
+│   ├── tof_node
+│   ├── ultrasonic_node
+│   └── orientation_entry
+│
+├── State / Fusion
+│   ├── fusion_motion
+│   └── orientation_state
+│
+├── Behavior
+│   └── behavior_combined_01
+│
+├── Expression
+│   └── oled_bridge
+│
+└── Operator / Debug
+    └── cyd_display_node
+```
+
+This represents the current functional architecture of Droid #01 as of r01.
+
+---
+
+## Significance of r01
+
+This milestone is different from the earlier individual component tests.
+
+Previously, the system had demonstrated that individual pieces worked:
+
+* sensors worked,
+* hardware discovery worked,
+* fusion worked,
+* orientation worked,
+* behavior worked,
+* OLED expression worked,
+* CYD communication worked.
+
+With r01, those pieces have become a **single operational system**.
+
+The droid now:
+
+```text
+Senses its environment
+        ↓
+Processes the sensor information
+        ↓
+Maintains internal state
+        ↓
+Responds through behavior
+        ↓
+Expresses itself through the OLED
+        ↓
+Exposes its internal state through the CYD
+```
+
+This is the first point at which Droid #01 can reasonably be described as a functioning integrated droid rather than a collection of sensor experiments.
+
+---
+
+## Development Baseline
+
+`droid01_bringup_r01.launch.py` should now be considered the **known-good integrated baseline**.
+
+Future development should preferably build from this baseline rather than continually modifying the architecture underneath it.
+
+The purpose of the revision designation is to preserve known-good system configurations.
+
+For example:
+
+```text
+droid01_bringup_r01.launch.py
+droid01_bringup_r02.launch.py
+droid01_bringup_r03.launch.py
+```
+
+A later revision can therefore represent a deliberate architectural or functional change while r01 remains available as a known-good reference.
+
+---
+
+## Future Direction
+
+The current architecture also establishes a foundation for expanding the CYD from a passive debug surface into a controlled operator interface.
+
+Potential future functions include:
+
+```text
+OBSERVE
+    ├── sensor values
+    ├── fused state
+    ├── orientation
+    ├── affect
+    └── system status
+
+TUNE
+    ├── behavior parameters
+    ├── thresholds
+    ├── timers
+    └── other runtime variables
+
+COMMAND
+    ├── explicit operator actions
+    ├── test behaviors
+    └── controlled overrides
+```
+
+The important architectural distinction going forward will be between **autonomous droid state** and **operator intervention**.
+
+The CYD should provide visibility into the droid's internal operation without obscuring which values originate from the droid itself and which values have been deliberately modified by an operator.
+
+---
+
+## r01 Conclusion
+
+Droid #01 has reached its first complete integrated bringup milestone.
+
+The system can now be started through a single ROS 2 launch configuration, automatically discover its physical hardware, process environmental and orientation information, generate behavioral state, express that state through the onboard OLED, and expose internal information wirelessly through the CYD.
+
+The result is a working foundation for the next stage of DroidWorks development:
+
+**a droid that can sense, interpret, respond, express, and be observed from outside itself.**
+
+**Droid #01 — r01: Integrated system baseline established.**
