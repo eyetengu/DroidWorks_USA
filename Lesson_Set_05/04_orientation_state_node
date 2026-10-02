@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+
+"""
+DroidWorks U.S.A. — Orientation State Node
+
+Layer 4 — Physical Condition
+
+Subscribes:
+  /orientation_x   std_msgs/Float32
+  /orientation_y   std_msgs/Float32
+  /tilt_state      std_msgs/Bool
+  /shock_state     std_msgs/Bool
+
+Publishes:
+  /orientation_state     std_msgs/String
+      UPRIGHT
+      TILTED
+
+  /orientation_summary   std_msgs/String
+      Diagnostic information for OLED/debug/MQTT layers.
+
+Notes:
+  - MPU-6050 orientation is authoritative.
+  - Hardware tilt switch is reported but does not define orientation.
+  - Shock is reported but does not currently affect state.
+  - Hysteresis prevents state chatter near the tilt threshold.
+"""
+
+import rclpy
+from rclpy.node import Node
+
+from std_msgs.msg import Bool, Float32, String
+
+
+class OrientationStateNode(Node):
+
+    def __init__(self):
+        super().__init__('orientation_state_node')
+
+        # ---------------------------------------------------------
+        # Parameters
+        # ---------------------------------------------------------
+
+        self.declare_parameter('publish_hz', 10.0)
+
+        # Enter TILTED at or above this angle.
+        self.declare_parameter('tilt_enter_degrees', 15.0)
+
+        # Return to UPRIGHT at or below this angle.
+        # This is lower than the enter threshold to provide hysteresis.
+        self.declare_parameter('tilt_exit_degrees', 10.0)
+
+        self.publish_hz = float(
+            self.get_parameter('publish_hz').value
+        )
+
+        self.tilt_enter = float(
+            self.get_parameter('tilt_enter_degrees').value
+        )
+
+        self.tilt_exit = float(
+            self.get_parameter('tilt_exit_degrees').value
+        )
+
+        if self.tilt_exit >= self.tilt_enter:
+            self.get_logger().warn(
+                'tilt_exit_degrees should be lower than '
+                'tilt_enter_degrees; correcting automatically.'
+            )
+
+            self.tilt_exit = self.tilt_enter - 2.0
+
+        # ---------------------------------------------------------
+        # Sensor state
+        # ---------------------------------------------------------
+
+        self.orientation_x = 0.0
+        self.orientation_y = 0.0
+
+        self.hardware_tilt = False
+        self.shock = False
+
+        # ---------------------------------------------------------
+        # Physical state
+        # ---------------------------------------------------------
+
+        self.current_state = 'UPRIGHT'
+
+        # ---------------------------------------------------------
+        # ROS subscriptions
+        # ---------------------------------------------------------
+
+        self.create_subscription(
+            Float32,
+            '/orientation_x',
+            self._cb_orientation_x,
+            10
+        )
+
+        self.create_subscription(
+            Float32,
+            '/orientation_y',
+            self._cb_orientation_y,
+            10
+        )
+
+        self.create_subscription(
+            Bool,
+            '/tilt_state',
+            self._cb_tilt,
+            10
+        )
+
+        self.create_subscription(
+            Bool,
+            '/shock_state',
+            self._cb_shock,
+            10
+        )
+
+        # ---------------------------------------------------------
+        # ROS publishers
+        # ---------------------------------------------------------
+
+        self.pub_state = self.create_publisher(
+            String,
+            '/orientation_state',
+            10
+        )
+
+        self.pub_summary = self.create_publisher(
+            String,
+            '/orientation_summary',
+            10
+        )
+
+        # ---------------------------------------------------------
+        # Timer
+        # ---------------------------------------------------------
+
+        self.create_timer(
+            1.0 / max(self.publish_hz, 1.0),
+            self._tick
+        )
+
+        self.get_logger().info(
+            'Orientation state node ready'
+        )
+
+        self.get_logger().info(
+            f'tilt enter = {self.tilt_enter:.1f} deg | '
+            f'tilt exit = {self.tilt_exit:.1f} deg'
+        )
+
+        self._publish()
+
+    # -------------------------------------------------------------
+    # Callbacks
+    # -------------------------------------------------------------
+
+    def _cb_orientation_x(self, msg: Float32):
+        self.orientation_x = float(msg.data)
+
+    def _cb_orientation_y(self, msg: Float32):
+        self.orientation_y = float(msg.data)
+
+    def _cb_tilt(self, msg: Bool):
+        self.hardware_tilt = bool(msg.data)
+
+    def _cb_shock(self, msg: Bool):
+        self.shock = bool(msg.data)
+
+    # -------------------------------------------------------------
+    # State processing
+    # -------------------------------------------------------------
+
+    def _tick(self):
+
+        # We care about the largest absolute orientation angle.
+        max_angle = max(
+            abs(self.orientation_x),
+            abs(self.orientation_y)
+        )
+
+        previous = self.current_state
+
+        # ---------------------------------------------------------
+        # Hysteresis
+        # ---------------------------------------------------------
+
+        if self.current_state == 'UPRIGHT':
+
+            if max_angle >= self.tilt_enter:
+                self.current_state = 'TILTED'
+
+        elif self.current_state == 'TILTED':
+
+            if max_angle <= self.tilt_exit:
+                self.current_state = 'UPRIGHT'
+
+        # ---------------------------------------------------------
+        # Log state transitions
+        # ---------------------------------------------------------
+
+        if self.current_state != previous:
+
+            self.get_logger().info(
+                f'{previous} -> {self.current_state} '
+                f'(roll={self.orientation_x:.1f} deg '
+                f'pitch={self.orientation_y:.1f} deg)'
+            )
+
+        self._publish()
+
+    # -------------------------------------------------------------
+    # Publishing
+    # -------------------------------------------------------------
+
+    def _publish(self):
+
+        # State
+        state_msg = String()
+        state_msg.data = self.current_state
+        self.pub_state.publish(state_msg)
+
+        # Diagnostic summary
+        summary_msg = String()
+
+        summary_msg.data = (
+            f'{self.current_state} | '
+            f'roll={self.orientation_x:.1f} '
+            f'pitch={self.orientation_y:.1f} | '
+            f'tilt_switch={int(self.hardware_tilt)} '
+            f'shock={int(self.shock)}'
+        )
+
+        self.pub_summary.publish(summary_msg)
+
+
+def main(args=None):
+
+    rclpy.init(args=args)
+
+    node = OrientationStateNode()
+
+    try:
+        rclpy.spin(node)
+
+    except KeyboardInterrupt:
+        pass
+
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
