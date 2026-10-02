@@ -1,0 +1,159 @@
+#include <Wire.h>
+#include <EEPROM.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// Droid Works USA — Droid #1 OLED expression controller
+// Classic Arduino Nano / SSD1306 128x64 I2C @ 0x3C
+// EEPROM provisioning layout:
+//   EID    @ 0
+//   TYPE   @ 32
+//   SENSOR @ 64
+//   SENSOR2@ 96
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_ADDR 0x3C
+#define OLED_RESET -1
+
+#define EID_ADDR 0
+#define TYPE_ADDR 32
+#define SENSOR_ADDR 64
+#define SENSOR2_ADDR 96
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+char eid[32];
+char typeName[32];
+char sensor[32];
+char sensor2[32];
+
+void readStringFromEEPROM(int addr, char *buffer, size_t maxLen) {
+  if (maxLen == 0) return;
+
+  size_t i = 0;
+  for (; i < maxLen - 1; i++) {
+    byte b = EEPROM.read(addr + i);
+    if (b == 0) break;
+    buffer[i] = (char)b;
+  }
+  buffer[i] = '\0';
+}
+
+void broadcastIdentity() {
+  readStringFromEEPROM(EID_ADDR, eid, sizeof(eid));
+  readStringFromEEPROM(TYPE_ADDR, typeName, sizeof(typeName));
+  readStringFromEEPROM(SENSOR_ADDR, sensor, sizeof(sensor));
+  readStringFromEEPROM(SENSOR2_ADDR, sensor2, sizeof(sensor2));
+
+  // Hardware Manager discovery line.
+  Serial.print("EID:");
+  Serial.print(eid);
+  Serial.print(",TYPE:");
+  Serial.print(typeName);
+  Serial.print(",SENSOR:");
+  Serial.print(sensor);
+  Serial.print(",SENSOR2:");
+  Serial.println(sensor2);
+}
+
+void drawEyes(int eyeHeight, int eyeWidth, int y, int radius) {
+  display.clearDisplay();
+
+  const int leftX = 18;
+  const int rightX = 74;
+
+  display.fillRoundRect(leftX, y, eyeWidth, eyeHeight, radius, SSD1306_WHITE);
+  display.fillRoundRect(rightX, y, eyeWidth, eyeHeight, radius, SSD1306_WHITE);
+
+  display.display();
+}
+
+void showCalm() {
+  drawEyes(24, 36, 20, 8);
+}
+
+void showAlert() {
+  drawEyes(42, 36, 11, 9);
+}
+
+void showFocused() {
+  drawEyes(12, 36, 26, 5);
+}
+
+void showHelp() {
+  // Simple attention/exclamation expression while keeping the same eye style.
+  display.clearDisplay();
+  display.fillRoundRect(12, 18, 40, 28, 8, SSD1306_WHITE);
+  display.fillRoundRect(76, 18, 40, 28, 8, SSD1306_WHITE);
+
+  display.fillRect(30, 52, 4, 5, SSD1306_WHITE);
+  display.fillRect(94, 52, 4, 5, SSD1306_WHITE);
+
+  display.display();
+}
+
+void setExpression(const char *cmd) {
+  if (strcmp(cmd, "CALM") == 0) {
+    showCalm();
+  } else if (strcmp(cmd, "ALERT") == 0) {
+    showAlert();
+  } else if (strcmp(cmd, "FOCUSED") == 0) {
+    showFocused();
+  } else if (strcmp(cmd, "HELP") == 0) {
+    showHelp();
+  }
+}
+
+void readCommands() {
+  static char command[24];
+  static byte index = 0;
+
+  while (Serial.available() > 0) {
+    char c = Serial.read();
+
+    if (c == '\r') continue;
+
+    if (c == '\n') {
+      command[index] = '\0';
+      if (index > 0) {
+        setExpression(command);
+      }
+      index = 0;
+      continue;
+    }
+
+    if (index < sizeof(command) - 1) {
+      command[index++] = c;
+    } else {
+      // Reset on overlong command.
+      index = 0;
+    }
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+
+  // Match the known-good physical orientation.
+  display.setRotation(2);
+
+  // Minimal initialization path that was confirmed working on this Nano.
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
+    Serial.println(F("SSD1306 initialization FAILED"));
+    while (true) {
+      delay(1000);
+    }
+  }
+
+  broadcastIdentity();
+
+  Serial.println(F("Droid OLED Eyes ready"));
+
+  showCalm();
+}
+
+void loop() {
+  readCommands();
+}
