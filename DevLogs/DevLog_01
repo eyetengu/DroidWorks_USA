@@ -1,0 +1,890 @@
+# Droidworks U.S.A.
+
+## Droid #1 — Build History & Milestone Record
+
+**Date:** Friday, October 2, 2026
+**Milestone:** First fully functioning integrated Droid #1 prototype
+
+---
+
+## 1. Executive Summary
+
+As of October 2, 2026, Droidworks U.S.A. Droid #1 has progressed from a collection of individual sensor, display, and microcontroller experiments into a functioning integrated robotic system.
+
+Droid #1 now has a Raspberry Pi 5 running ROS 2 as its central computing platform. Multiple Arduino-based sensor and display modules are connected through a powered USB hub. A dedicated Hardware Manager identifies those physical modules by persistent EEPROM device identity rather than relying on fixed USB port numbers. Individual ROS sensor entry nodes receive their assigned hardware from the Hardware Manager.
+
+The droid currently senses its environment through multiple sensor systems, processes those inputs through ROS 2, generates higher-level motion/orientation and affect states, expresses those states through an onboard OLED "eyes" display, and simultaneously transmits internal state information wirelessly to an ESP32-based CYD operator/debug display.
+
+The most important result is that the entire chain has now been demonstrated successfully:
+
+**Physical sensors → USB/MCU layer → Hardware Manager → ROS 2 entry nodes → fusion/state processing → affect → physical OLED expression → wireless CYD visualization**
+
+This establishes Droid #1 as a functioning integrated prototype rather than simply a collection of working subsystems.
+
+The CYD currently functions as a supplemental observation/debug interface. The architecture also provides a clear path toward eventually adding operator controls such as sliders, counters, parameter adjustments, overrides, and direct behavioral commands.
+
+---
+
+# 2. Overall System Architecture
+
+The current architecture is centered on the Raspberry Pi 5, referred to as **pi500**, running ROS 2.
+
+```text
+                         DROID #1
+                             │
+                     Raspberry Pi 5
+                         ROS 2
+                             │
+                     Powered USB Hub
+                ┌────────────┼────────────┐
+                │            │            │
+             Sensor        Display       Other
+              MCUs           MCU          USB
+                │
+        Hardware Manager
+                │
+        Device Identity Map
+                │
+       ┌────────┼─────────┐
+       │        │         │
+      PIR      RCWL    Distance
+       │        │      Sensors
+       │        │       │    │
+       └────────┴───────┴────┘
+                  │
+             ROS 2 State
+                  │
+             Affect System
+             / OLED Logic
+                  │
+          ┌───────┴────────┐
+          │                │
+      Physical OLED       CYD
+       Droid Eyes      Debug/Operator
+```
+
+The key architectural decision made during this phase was to establish the **Hardware Manager as the single hardware-discovery authority**.
+
+Instead of every sensor node attempting to independently scan the USB hub, the Hardware Manager discovers the connected devices once, associates each device's persistent EID with its current Linux serial port, and publishes that information to the rest of the ROS system.
+
+This greatly simplifies the entry-node architecture and eliminates dependence on changing `/dev/ttyUSB#` assignments.
+
+---
+
+# 3. Hardware Built and Integrated
+
+The current Droid #1 hardware inventory includes six principal MCU devices.
+
+### Motion
+
+**PIR module**
+
+* EID: `DWUSA-01-01-01`
+* TYPE: `MOTION`
+* SENSOR: `PIR`
+
+**RCWL module**
+
+* EID: `DWUSA-01-02-01`
+* TYPE: `MOTION`
+* SENSOR: `RCWL`
+
+### Distance
+
+**ToF module**
+
+* EID: `DWUSA-01-03-01`
+* TYPE: `DISTANCE`
+* SENSOR: `TOF`
+
+**Ultrasonic module**
+
+* EID: `DWUSA-01-04-01`
+* TYPE: `DISTANCE`
+* SENSOR: `ULTRASONIC`
+
+### Orientation
+
+**GY-521 / MPU-6050 orientation module**
+
+* EID: `DWUSA-05-01-01`
+* TYPE: `ORIENTATION`
+* SENSOR: `GY-521`
+* SENSOR2: `SHOCK`
+
+This module combines:
+
+* MPU-6050 accelerometer/gyro hardware
+* tilt switch
+* shock switch
+
+### Display
+
+**OLED expression module**
+
+* EID: `DWUSA-02-01-01`
+* TYPE: `DISPLAY`
+* SENSOR: `OLED`
+
+The OLED is intended to be the droid's **personality/expression surface**, rather than a debugging display.
+
+---
+
+# 4. Persistent Device Identity System
+
+One of the most important pieces of infrastructure established during the build was persistent identity storage in EEPROM.
+
+Each MCU was initially flashed with an **EEPROM Device Information Writer** sketch. That temporary provisioning firmware wrote the device's identity information into EEPROM.
+
+The established EEPROM layout is:
+
+```text
+EID     → address 0
+TYPE    → address 32
+SENSOR  → address 64
+SENSOR2 → address 96
+```
+
+The strings are stored as null-terminated strings using `EEPROM.update()`.
+
+A representative identity was:
+
+```text
+EID:    DWUSA-01-01-01
+TYPE:   MOTION
+SENSOR: PIR
+SENSOR2: NULL
+```
+
+After provisioning, the writer firmware was replaced with the normal runtime firmware.
+
+The important discovery during the build was that **EEPROM persistence and serial discovery are two separate issues**.
+
+The EEPROM identity remained stored after runtime firmware replacement, but the Hardware Manager could not discover a device unless the runtime firmware also read the EEPROM and broadcast the identity over serial.
+
+This led to a useful and now established model:
+
+**EEPROM provides persistent identity. Runtime firmware exposes that identity to the discovery system.**
+
+---
+
+# 5. Hardware Manager
+
+The Hardware Manager became the major architectural stabilization point of the build.
+
+Its purpose is to perform hardware discovery once, centrally and consistently.
+
+The manager:
+
+1. Scans candidate serial devices.
+2. Identifies the USB/CH340 converters.
+3. Opens candidate serial ports.
+4. Resets the MCU through DTR.
+5. Waits for the MCU to announce its EEPROM identity.
+6. Parses EID, TYPE, SENSOR, and SENSOR2.
+7. Associates the identity with the current `/dev/ttyUSB#`.
+8. Builds a device registry.
+9. Publishes the registry on `/hardware/device_map`.
+
+The map is published using reliable, transient-local ROS QoS so that newly launched entry nodes can receive the already-established device map without requiring another hardware discovery cycle.
+
+The manager performs the physical discovery/reset operation **once at startup**.
+
+It then republishes its known map periodically without repeatedly resetting the devices.
+
+This was an important simplification because it prevents each individual sensor node from repeatedly touching the USB hardware.
+
+---
+
+# 6. The USB Port Assignment Problem
+
+One of the early problems exposed by the project was the instability of Linux USB serial numbering.
+
+Devices could appear as:
+
+```text
+/dev/ttyUSB0
+/dev/ttyUSB1
+/dev/ttyUSB2
+...
+```
+
+but their assignments changed after disconnect/reconnect events and hub power cycles.
+
+At one point the ToF device existed as a different `/dev/ttyUSB#` than it had previously.
+
+This demonstrated why hard-coded port assignments were unsuitable for the final architecture.
+
+The EID-based Hardware Manager solved this by changing the relationship from:
+
+**"this sensor is always ttyUSB4"**
+
+to:
+
+**"this EID is currently ttyUSB4."**
+
+That is a much more robust model for a modular physical robot.
+
+---
+
+# 7. USB Hub / CH340 Failure
+
+Another significant hardware problem occurred during development.
+
+The USB subsystem showed six CH340 USB converters but, at one point, only five usable `/dev/ttyUSB*` devices.
+
+Investigation of the Linux device state showed that one serial device existed at the kernel/sysfs level but had failed to create a usable device node.
+
+The kernel log reported:
+
+```text
+ch341-uart: probe of ttyUSB5 failed with error -32
+```
+
+There was also visible disconnect/reconnect activity.
+
+The practical solution was to **power-cycle the powered USB hub**.
+
+After the hub reset, all six CH340 devices appeared correctly:
+
+```text
+/dev/ttyUSB0
+/dev/ttyUSB1
+/dev/ttyUSB2
+/dev/ttyUSB3
+/dev/ttyUSB4
+/dev/ttyUSB5
+```
+
+The Hardware Manager subsequently discovered all six devices successfully.
+
+This incident reinforced an important lesson for the build:
+
+**USB enumeration problems can masquerade as software or sensor failures.**
+
+---
+
+# 8. PIR Integration
+
+The PIR path was successfully integrated into the Hardware Manager architecture.
+
+The final intended flow is:
+
+```text
+PIR MCU
+   ↓
+EEPROM EID
+   ↓
+Hardware Manager
+   ↓
+PIR entry node
+   ↓
+/pir_state
+```
+
+The PIR node publishes:
+
+```text
+/pir_state
+```
+
+as a ROS `Bool`.
+
+Direct testing produced expected true/false transitions.
+
+The PIR entry node was subsequently changed from independent device discovery to Hardware Manager assignment.
+
+---
+
+# 9. RCWL Integration
+
+The RCWL motion sensor followed the same architecture.
+
+Its identity:
+
+```text
+DWUSA-01-02-01
+TYPE=MOTION
+SENSOR=RCWL
+```
+
+is discovered by the Hardware Manager.
+
+The RCWL entry node receives its assigned serial port from the device map and publishes:
+
+```text
+/rcwl_state
+```
+
+The RCWL path was explicitly verified with real `true/false` readings.
+
+This established the first clear pair of working motion inputs for the droid.
+
+---
+
+# 10. Ultrasonic Integration
+
+The ultrasonic system was integrated as a distance entry node under Hardware Manager control.
+
+The MCU emitted raw readings such as:
+
+```text
+ultrasonic:103.9
+ultrasonic:89.2
+ultrasonic:80.5
+ultrasonic:41.0
+```
+
+The ROS entry node converted the measurements to millimeters and published:
+
+```text
+/ultrasonic_distance
+```
+
+The node rejects invalid values, including zero and readings outside the configured useful range.
+
+A behavior observed during testing was that invalid measurements stop producing new messages while the last valid value remains available.
+
+This was treated as acceptable for the current prototype rather than redesigning the sensor/state architecture during the integration push.
+
+---
+
+# 11. ToF Integration
+
+The ToF sensor presented several challenges during the build.
+
+The device correctly announced its identity:
+
+```text
+EID:DWUSA-01-03-01,TYPE:DISTANCE,SENSOR:TOF
+```
+
+but the VL53L0X hardware initially reported:
+
+```text
+tof:error - Failed to boot VL53L0X
+```
+
+This appeared to be at least partly related to the physical/mechanical arrangement of the device.
+
+After the physical mounting was changed, valid ToF distance readings appeared.
+
+The final ROS interface is:
+
+```text
+/tof_distance
+```
+
+using:
+
+```text
+std_msgs/msg/Float32
+```
+
+The ToF path is now functioning as part of the integrated sensor stack.
+
+An additional software problem was discovered when the CYD debug node had originally subscribed to `/tof_distance` using `std_msgs/msg/Int32` while the ToF node published `Float32`.
+
+That produced a ROS topic type conflict.
+
+The CYD subscription was subsequently changed to `Float32`.
+
+This was a useful example of a problem that was not caused by the physical sensor at all, but by a message-type mismatch at the ROS integration boundary.
+
+---
+
+# 12. Orientation System
+
+The orientation module combines several inputs:
+
+* MPU-6050 acceleration data
+* tilt switch
+* shock switch
+
+The raw MCU telemetry looks like:
+
+```text
+TILT:0 SHOCK:0 AX:0.11 AY:0.01 AZ:0.98
+```
+
+The ROS entry node calculates orientation from the gravity vector.
+
+Roll is calculated from:
+
+```python
+atan2(ay, az)
+```
+
+Pitch is calculated from:
+
+```python
+atan2(-ax, sqrt(ay² + az²))
+```
+
+The system publishes:
+
+```text
+/orientation_x
+/orientation_y
+/tilt_state
+/shock_state
+/accel_x
+/accel_y
+/accel_z
+```
+
+A higher-level orientation state node then determines whether the droid is upright or tilted.
+
+The orientation state logic uses hysteresis:
+
+* Enter TILTED at approximately 15°
+* Return to UPRIGHT at approximately 10°
+
+This prevents rapid state oscillation near the transition threshold.
+
+The orientation system was physically tested and confirmed to register both orientation changes and upright/tilted state.
+
+---
+
+# 13. OLED Expression System
+
+The onboard OLED became the droid's physical expression system.
+
+Hardware:
+
+* Classic Arduino Nano
+* SSD1306 OLED
+* 128×64 resolution
+* I2C address `0x3C`
+
+The OLED is deliberately simple.
+
+The chosen visual language is **eyes**, rather than a large text display or complex face.
+
+The current expressions are:
+
+```text
+CALM
+ALERT
+FOCUSED
+HELP
+```
+
+The final eye design uses rounded eyes without pupils by default.
+
+The meanings are approximately:
+
+```text
+CALM
+medium, relaxed eyes
+
+ALERT
+tall, open eyes
+
+FOCUSED
+shorter, narrowed eyes
+```
+
+The OLED implementation also reads the existing EEPROM identity and announces itself so the Hardware Manager can discover it.
+
+A major lesson here was that a simpler OLED sketch proved significantly more reliable than an oversized version.
+
+The Nano's limited SRAM made it advantageous to keep the expression controller compact.
+
+A minimal hardware test produced:
+
+```text
+Starting OLED...
+SSD1306 initialization OK.
+```
+
+and a subsequent full-white test confirmed the display hardware itself was functioning.
+
+---
+
+# 14. Fusion and Higher-Level State
+
+Once all individual sensor entry nodes were working, the next layer was brought online.
+
+The motion sensors feed a fusion layer that generates:
+
+```text
+/fused_motion
+```
+
+The orientation inputs feed:
+
+```text
+/orientation_state
+/orientation_summary
+```
+
+This successfully demonstrated that the robot was no longer merely reporting raw sensor measurements.
+
+The ROS system was now interpreting those sensor values into higher-level states.
+
+---
+
+# 15. Affect System
+
+The existing affect architecture was deliberately preserved rather than redesigned during this integration phase.
+
+The affect node subscribes to motion/fusion information and produces the current droid affect state.
+
+The system currently defines states including:
+
+```text
+CALM
+ALERT
+FOCUSED
+WARY
+GUARDED
+```
+
+The current working logic actively maps the primary demonstrated states:
+
+```text
+CALM
+ALERT
+FOCUSED
+```
+
+and exposes:
+
+```text
+/droid_affect
+/oled_expr
+/oled_summary
+```
+
+The affect system was tested with live sensor activity.
+
+The important milestone was that the affect state propagated all the way to physical behavior:
+
+```text
+Sensor activity
+    ↓
+ROS state/fusion
+    ↓
+Affect
+    ↓
+OLED expression
+```
+
+The physical OLED was observed changing among **CALM, ALERT, and FOCUSED** in response to the droid's environment.
+
+That was the first direct demonstration of a complete perception-to-expression pipeline.
+
+---
+
+# 16. CYD Wireless Debug / Operator Surface
+
+The project also established an ESP32-based CYD display as a wireless supplemental interface.
+
+The CYD is intentionally not the droid's brain.
+
+Its current role is to provide an external window into the internal ROS/MQTT state of the droid.
+
+The CYD includes pages for areas such as:
+
+```text
+Overview
+Affect
+Motion
+Orientation
+Radar
+System
+```
+
+The orientation page provides a graphical representation of roll and pitch, along with state indicators.
+
+The radar page uses a configured maximum range of 100 cm.
+
+Touch navigation has been implemented, allowing a stylus or finger to move between display pages.
+
+The wireless interface receives status from the Raspberry Pi through the MQTT-based debug/status channel.
+
+After correcting the ToF message-type mismatch, the CYD became functional alongside the complete sensor stack.
+
+---
+
+# 17. The Concept That Has Emerged
+
+The CYD represents more than a convenient debug screen.
+
+It has established the beginnings of an **operator interface into the droid's internal state**.
+
+The droid can operate autonomously while simultaneously exposing information about what it is sensing and how its internal state is changing.
+
+Conceptually:
+
+```text
+            AUTONOMOUS DROID
+                  │
+        ┌─────────┴─────────┐
+        │                   │
+     PHYSICAL              INTERNAL
+     BEHAVIOR               STATE
+        │                   │
+     OLED eyes              │
+                            ↓
+                           CYD
+                       operator view
+```
+
+This creates a useful separation:
+
+**The droid acts.
+The CYD observes what the droid is doing and why.**
+
+The architecture also leaves room for a future second direction:
+
+```text
+CYD
+ ↓
+operator command / parameter
+ ↓
+MQTT / ROS
+ ↓
+droid behavior/state
+```
+
+That would make it possible to add:
+
+* sliders
+* counters
+* tunable thresholds
+* sensor sensitivity controls
+* timers
+* affect controls
+* state overrides
+* explicit behavioral commands
+* diagnostics
+* calibration controls
+
+without turning the CYD into the primary control architecture.
+
+---
+
+# 18. Major Challenges Encountered
+
+Several recurring categories of problems were encountered during the build.
+
+### Fixed USB-port assumptions
+
+Hard-coded `/dev/ttyUSB#` assignments proved unreliable.
+
+**Resolution:** central Hardware Manager with persistent EID-based identification.
+
+### EEPROM identity versus runtime discovery
+
+The identity existed in EEPROM, but replacing the provisioning firmware removed the serial broadcast that allowed discovery.
+
+**Resolution:** runtime firmware was modified to read EEPROM and announce its identity at startup.
+
+### USB hub / CH340 enumeration failure
+
+One CH340 converter temporarily failed kernel probing with error `-32`.
+
+**Resolution:** powered USB hub reset restored all six serial devices.
+
+### Sensor initialization issues
+
+The ToF module initially reported a VL53L0X boot failure.
+
+**Resolution:** physical/mechanical mounting was changed and usable measurements subsequently appeared.
+
+### ROS topic message mismatch
+
+The CYD initially used `Int32` for `/tof_distance` while the ToF node used `Float32`.
+
+**Resolution:** CYD subscription was changed to `Float32`.
+
+### Duplicate/legacy ROS packages
+
+The workspace contains a number of older packages and executables from earlier development stages.
+
+Examples include multiple historical droid sensor stacks and lesson/test packages.
+
+These were deliberately left in place for now rather than deleting them during active integration.
+
+The current functioning architecture is based on the newer `droidworks_sensors` and `droidworks_display` components.
+
+### Architecture churn
+
+There was a period where discovery responsibilities were being duplicated among individual nodes.
+
+This created unnecessary complexity and made troubleshooting increasingly difficult.
+
+**Resolution:** the Hardware Manager was established as the single discovery authority.
+
+That decision dramatically simplified the system and made the subsequent integration substantially more predictable.
+
+### OLED implementation complexity
+
+An earlier OLED implementation encountered initialization problems and was larger than necessary for the Nano.
+
+**Resolution:** the OLED system was simplified into a compact dedicated eye-expression controller.
+
+---
+
+# 19. Current Working State — October 2, 2026
+
+At the end of this development milestone, the following components have been demonstrated as working together:
+
+### Hardware
+
+* Raspberry Pi 5 ✅
+* Powered USB hub ✅
+* PIR sensor MCU ✅
+* RCWL sensor MCU ✅
+* Ultrasonic sensor MCU ✅
+* ToF sensor MCU ✅
+* Orientation/shock MCU ✅
+* OLED display MCU ✅
+* ESP32 CYD ✅
+
+### Software
+
+* Hardware Manager ✅
+* PIR entry node ✅
+* RCWL entry node ✅
+* Ultrasonic entry node ✅
+* ToF entry node ✅
+* Orientation entry node ✅
+* Orientation state processing ✅
+* Motion fusion ✅
+* Affect processing ✅
+* OLED bridge ✅
+* CYD wireless/debug surface ✅
+
+### Demonstrated end-to-end behaviors
+
+* PIR detects motion ✅
+* RCWL detects motion ✅
+* Ultrasonic reports distance ✅
+* ToF reports distance ✅
+* Orientation detects changes ✅
+* Tilt state works ✅
+* Shock input works ✅
+* Motion fusion works ✅
+* Affect state changes ✅
+* OLED changes physical expression ✅
+* CYD receives and displays internal state ✅
+
+Most importantly:
+
+**Droid #1 now senses its environment, processes what it senses, changes internal state, expresses that state physically, and exposes its internal state wirelessly to an operator display.**
+
+---
+
+# 20. What Has Not Yet Been Completed
+
+The droid is operational, but this is still a prototype milestone rather than the final architecture.
+
+The major remaining work includes:
+
+### Master launch
+
+The individual nodes have been proven separately.
+
+The next goal is a single reliable launch sequence that brings up the complete system in the correct order.
+
+The intended progression is:
+
+```text
+Hardware Manager
+→ sensor entry nodes
+→ fusion/state nodes
+→ affect
+→ OLED bridge
+→ CYD/debug
+```
+
+### CYD operator controls
+
+The CYD currently provides monitoring and visualization.
+
+The next stage is to add deliberate operator controls while preserving the distinction between:
+
+* autonomous state
+* adjustable parameters
+* explicit operator overrides
+
+### Parameter and behavior instrumentation
+
+The CYD can eventually expose the internal values driving the droid's decisions.
+
+This may include:
+
+* affect score
+* vigilance
+* sensor thresholds
+* timing values
+* state counters
+* confidence values
+* behavior state
+* expression state
+
+### Mechanical packaging
+
+The sensor MCUs are being mounted on modular thin-wood/sandwich boards.
+
+The enclosure/shell still needs to be developed around the mechanical board system while preserving:
+
+* structural stability
+* modular board insertion/removal
+* USB access
+* powered-hub access
+* wiring serviceability
+
+---
+
+# 21. Historical Significance of This Milestone
+
+The most important achievement of this phase was not any individual sensor.
+
+It was establishing a coherent relationship between the robot's physical hardware, its software brain, its internal state, and its external operator interface.
+
+Earlier development consisted largely of isolated experiments:
+
+```text
+"Can this sensor work?"
+"Can the OLED work?"
+"Can ROS receive this?"
+"Can the CYD display that?"
+```
+
+By October 2, 2026, the project had moved beyond those questions.
+
+The system can now be described as an integrated robotic platform:
+
+```text
+        PERCEIVE
+           ↓
+        INTERPRET
+           ↓
+          STATE
+           ↓
+         AFFECT
+           ↓
+       EXPRESSION
+           ↓
+       OPERATOR VIEW
+```
+
+That is the foundation on which the more advanced behavior and operator-control systems can now be built.
+
+---
+
+# 22. Milestone Statement
+
+**October 2, 2026 — Droidworks U.S.A. Droid #1 achieved its first fully integrated operational milestone.**
+
+Droid #1 can now sense its environment using multiple physical sensor systems, identify its hardware modules through persistent EIDs, route those modules through a central Hardware Manager, process sensor information through ROS 2, generate higher-level orientation and affect states, express those states through onboard OLED eyes, and simultaneously present the droid's internal condition on a wireless CYD display.
+
+The CYD has therefore evolved into the beginning of an external "window into the mind of the droid."
+
+The next phase is no longer primarily about proving that the pieces can work.
+
+It is about **turning the functioning prototype into a coherent robot platform** — consolidating startup, packaging the hardware, exposing useful internal variables, and developing controlled operator interaction without compromising the droid's autonomous architecture.
