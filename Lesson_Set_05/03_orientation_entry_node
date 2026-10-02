@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+
+import math
+import re
+import serial
+
+import rclpy
+from rclpy.node import Node
+
+from std_msgs.msg import Bool, Float32
+
+
+LINE_RE = re.compile(
+    r"TILT:(\d+)\s+"
+    r"SHOCK:(\d+)\s+"
+    r"AX:([-+]?\d+(?:\.\d+)?)\s+"
+    r"AY:([-+]?\d+(?:\.\d+)?)\s+"
+    r"AZ:([-+]?\d+(?:\.\d+)?)"
+)
+
+
+class OrientationEntryNode(Node):
+
+    def __init__(self):
+        super().__init__('orientation_entry')
+
+        self.declare_parameter('port', '/dev/ttyUSB2')
+        self.declare_parameter('baud', 115200)
+
+        port = self.get_parameter('port').value
+        baud = self.get_parameter('baud').value
+
+        self.get_logger().info(
+            f'Opening orientation controller on {port} @ {baud}'
+        )
+
+        self.serial = serial.Serial(
+            port=port,
+            baudrate=baud,
+            timeout=0.1
+        )
+
+        self.tilt_pub = self.create_publisher(
+            Bool,
+            '/tilt_state',
+            10
+        )
+
+        self.shock_pub = self.create_publisher(
+            Bool,
+            '/shock_state',
+            10
+        )
+
+        self.orientation_x_pub = self.create_publisher(
+            Float32,
+            '/orientation_x',
+            10
+        )
+
+        self.orientation_y_pub = self.create_publisher(
+            Float32,
+            '/orientation_y',
+            10
+        )
+
+        self.accel_x_pub = self.create_publisher(
+            Float32,
+            '/accel_x',
+            10
+        )
+
+        self.accel_y_pub = self.create_publisher(
+            Float32,
+            '/accel_y',
+            10
+        )
+
+        self.accel_z_pub = self.create_publisher(
+            Float32,
+            '/accel_z',
+            10
+        )
+
+        self.timer = self.create_timer(0.01, self.read_serial)
+
+    def read_serial(self):
+
+        try:
+            line = self.serial.readline().decode(
+                'utf-8',
+                errors='ignore'
+            ).strip()
+
+        except Exception as exc:
+            self.get_logger().error(
+                f'Serial read error: {exc}'
+            )
+            return
+
+        if not line:
+            return
+
+        match = LINE_RE.search(line)
+
+        if not match:
+            return
+
+        tilt_raw, shock_raw, ax, ay, az = match.groups()
+
+        tilt = bool(int(tilt_raw))
+        shock = bool(int(shock_raw))
+
+        ax = float(ax)
+        ay = float(ay)
+        az = float(az)
+
+        # Calculate static orientation from gravity vector.
+        roll = math.degrees(
+            math.atan2(ay, az)
+        )
+
+        pitch = math.degrees(
+            math.atan2(
+                -ax,
+                math.sqrt(ay * ay + az * az)
+            )
+        )
+
+        msg = Bool()
+        msg.data = tilt
+        self.tilt_pub.publish(msg)
+
+        msg = Bool()
+        msg.data = shock
+        self.shock_pub.publish(msg)
+
+        msg = Float32()
+        msg.data = roll
+        self.orientation_x_pub.publish(msg)
+
+        msg = Float32()
+        msg.data = pitch
+        self.orientation_y_pub.publish(msg)
+
+        msg = Float32()
+        msg.data = ax
+        self.accel_x_pub.publish(msg)
+
+        msg = Float32()
+        msg.data = ay
+        self.accel_y_pub.publish(msg)
+
+        msg = Float32()
+        msg.data = az
+        self.accel_z_pub.publish(msg)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+
+    node = OrientationEntryNode()
+
+    try:
+        rclpy.spin(node)
+
+    except KeyboardInterrupt:
+        pass
+
+    finally:
+        node.serial.close()
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
