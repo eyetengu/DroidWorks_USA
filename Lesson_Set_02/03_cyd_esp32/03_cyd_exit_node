@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+"""
+DroidWorks U.S.A. — Debug Exit Node
+Aggregates live ROS topics into one MQTT status message for the
+CYD forearm debug surface (and any future operator tools).
+
+Subscribes (ROS 2):
+  /droid_affect     std_msgs/String   "LEVEL:NAME"   e.g. "2:FOCUSED"
+  /pir_state        std_msgs/Bool
+  /rcwl_state       std_msgs/Bool
+  /fused_motion     std_msgs/Bool
+  /oled_expr        std_msgs/String
+  /oled_summary     std_msgs/String   used to extract charge-meter score
+
+Publishes (MQTT):
+  droidworks/debug/status   JSON
+
+Broker defaults to localhost:1883 (same machine as rpi_ws).
+Vigilance is derived from the score= field in /oled_summary
+and scaled 0-100 using max_score (default 4.0).
+"""
+
+import json
+import re
+import time
+
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import Bool, String
+from std_msgs.msg import Bool, String, Int32, Float32
+
+try:
+    import paho.mqtt.client as mqtt
+except ImportError:
+    mqtt = None
+
+
+class DebugExitNode(Node):
+    def __init__(self):
+        super().__init__('dw_debug_exit_node')
+
+        # ---------- Parameters ----------
+        self.declare_parameter('mqtt_host', 'localhost')
+        self.declare_parameter('mqtt_port', 1883)
+        self.declare_parameter('mqtt_topic', 'droidworks/debug/status')
+        self.declare_parameter('publish_hz', 4.0)
+        self.declare_parameter('max_score', 4.0)   # charge-meter ceiling
+
+        self.mqtt_host = str(self.get_parameter('mqtt_host').value)
+        self.mqtt_port = int(self.get_parameter('mqtt_port').value)
+        self.mqtt_topic = str(self.get_parameter('mqtt_topic').value)
+        self.publish_hz = float(self.get_parameter('publish_hz').value)
+        self.max_score = float(self.get_parameter('max_score').value)
+
+        # ---------- Latest state ----------
+        self.affect_name = 'CALM'
+        self.affect_level = 0
+        self.vigilance = 0          # 0-100
+        self.pir = False
+        self.rcwl = False
+        self.fused = False
+        self.oled_expr = 'CALM'
+
+        self.tof_distance = 0
+        self.ultrasonic_distance = 0.0
+
+        self.shock = False
+        self.tilt = False
+        self.orientation_x = 0.0
+        self.orientation_y = 0.0
+        self.orientation_state = 'UPRIGHT'
+
+        self._score_re = re.compile(r'score\s*=\s*([0-9.]+)', re.IGNORECASE)
+
+        # ---------- ROS subscriptions ----------
+        self.create_subscription(String, '/droid_affect', self._cb_affect, 10)
+        self.create_subscription(Bool, '/pir_state', self._cb_pir, 10)
+        self.create_subscription(Bool, '/rcwl_state', self._cb_rcwl, 10)
+        self.create_subscription(Bool, '/fused_motion', self._cb_fused, 10)
+        self.create_subscription(String, '/oled_expr', self._cb_oled_expr, 10)
+        self.create_subscription(String, '/oled_summary', self._cb_oled_summary, 10)
+
+        self.create_subscription(Float32, '/tof_distance', self._cb_tof_distance,  10)
+        self.create_subscription(Float32, '/ultrasonic_distance', self._cb_ultrasonic_distance, 10)
+
+        self.create_subscription(    Float32,    '/orientation_x',    self._cb_orientation_x,    10)
+        self.create_subscription(    Float32,    '/orientation_y',    self._cb_orientation_y,    10)
+        self.create_subscription(    Bool,       '/tilt_state',    self._cb_tilt,    10)
+        self.create_subscription(    Bool,       '/shock_state',    self._cb_shock,    10)
+        self.create_subscription(    String,     '/orientation_state',    self._cb_orientation_state,    10)
+        
+        # ---------- MQTT ----------
+        self.mqtt_ok = False
+        self.client = None
+        if mqtt is None:
+            self.get_logger().error(
+                'paho-mqtt not installed.  Run:  pip3 install paho-mqtt'
+            )
+        else:
+            self._setup_mqtt()
+
+        # ---------- Timer ----------
+        period = 1.0 / max(self.publish_hz, 0.5)
+        self.create_timer(period, self._publish_status)
+
+        self.get_logger().info(
+            f'Debug exit ready → mqtt://{self.mqtt_host}:{self.mqtt_port}  '
+            f'topic={self.mqtt_topic}'
+        )
+
+    # ------------------------------------------------------------------
+    def _setup_mqtt(self):
+        # Compatible with both paho-mqtt 1.x and 2.x
+        try:
+            # paho-mqtt 2.x
+            self.client = mqtt.Client(
+                client_id='dw_debug_exit',
+                protocol=mqtt.MQTTv311,
+                callback_api_version=mqtt.CallbackAPIVersion.VERSION1,
+            )
+        except AttributeError:
+            # paho-mqtt 1.x
+            self.client = mqtt.Client(client_id='dw_debug_exit', protocol=mqtt.MQTTv311)
+
+        self.client.on_connect = self._on_connect
+        self.client.on_disconnect = self._on_disconnect
+        try:
+            self.client.connect(self.mqtt_host, self.mqtt_port, keepalive=30)
+            self.client.loop_start()
+        except Exception as e:
+            self.get_logger().error(f'MQTT connect failed: {e}')
+            self.mqtt_ok = False
+
+    def _on_connect(self, client, userdata, flags, rc):
+        # rc == 0 means success on both 1.x and 2.x VERSION1 callbacks
+        if rc == 0:
+            self.mqtt_ok = True
+            self.get_logger().info('MQTT connected')
+        else:
+            self.mqtt_ok = False
+            self.get_logger().warn(f'MQTT connect failed, rc={rc}')
+
+    def _on_disconnect(self, client, userdata, rc):
+        self.mqtt_ok = False
+        self.get_logger().warn(f'MQTT disconnected, rc={rc}')
+
+    # ------------------------------------------------------------------
+    # ROS callbacks
+    def _cb_affect(self, msg: String):
+        # Expected: "2:FOCUSED" or just "FOCUSED"
+        text = (msg.data or '').strip()
+        if ':' in text:
+            left, right = text.split(':', 1)
+            try:
+                self.affect_level = int(left.strip())
+            except ValueError:
+                self.affect_level = 0
+            self.affect_name = right.strip().upper() or 'CALM'
+        else:
+            self.affect_name = text.upper() or 'CALM'
+            lookup = {'CALM': 0, 'ALERT': 1, 'FOCUSED': 2, 'WARY': 3, 'GUARDED': 4}
+            self.affect_level = lookup.get(self.affect_name, 0)
+
+    def _cb_pir(self, msg: Bool):
+        self.pir = bool(msg.data)
+
+    def _cb_rcwl(self, msg: Bool):
+        self.rcwl = bool(msg.data)
+
+    def _cb_fused(self, msg: Bool):
+        self.fused = bool(msg.data)
+
+
+    def _cb_oled_expr(self, msg: String):
+        self.oled_expr = (msg.data or '').strip() or self.affect_name
+
+    def _cb_oled_summary(self, msg: String):
+        """Pull score=X.XX out of the summary line and map to 0-100."""
+        text = msg.data or ''
+        m = self._score_re.search(text)
+        if not m:
+            return
+        try:
+            score = float(m.group(1))
+        except ValueError:
+            return
+        if self.max_score <= 0:
+            return
+        pct = int(round(100.0 * score / self.max_score))
+        self.vigilance = max(0, min(100, pct))
+
+
+    def _cb_tof_distance(self, msg: Int32):
+        self.tof_distance = int(msg.data)
+
+    def _cb_ultrasonic_distance(self, msg: Float32):
+        self.ultrasonic_distance = float(msg.data)
+
+
+    def _cb_orientation_x(self, msg: Float32):
+        self.orientation_x = float(msg.data)
+
+    def _cb_orientation_y(self, msg: Float32):
+        self.orientation_y = float(msg.data)
+
+    def _cb_tilt(self, msg: Bool):
+        self.tilt = bool(msg.data)
+
+    def _cb_shock(self, msg: Bool):
+        self.shock = bool(msg.data)
+
+    def _cb_orientation_state(self, msg: String):
+        self.orientation_state = (msg.data or '').strip().upper() or 'UPRIGHT'
+    
+    # ------------------------------------------------------------------
+    def _publish_status(self):
+        if not self.mqtt_ok or self.client is None:
+            return
+
+        payload = {
+            'affect': self.affect_name,
+            'level': self.affect_level,
+            'vigilance': self.vigilance,
+            'pir': self.pir,
+            'rcwl': self.rcwl,
+            'fused': self.fused,
+            'oled_expr': self.oled_expr,
+            'shock': self.shock,
+            'tilt': self.tilt,
+            'orientation_x': self.orientation_x,
+            'orientation_y': self.orientation_y,
+            'orientation_state': self.orientation_state,
+            'ts': int(time.time()),
+            'tof_distance': self.tof_distance,
+            'ultrasonic_distance': self.ultrasonic_distance,
+        }
+
+        try:
+            self.client.publish(
+                self.mqtt_topic,
+                json.dumps(payload, separators=(',', ':')),
+                qos=0,
+                retain=False,
+            )
+        except Exception as e:
+            self.get_logger().warn(f'MQTT publish error: {e}')
+            self.mqtt_ok = False
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = DebugExitNode()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if node.client is not None:
+            try:
+                node.client.loop_stop()
+                node.client.disconnect()
+            except Exception:
+                pass
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
