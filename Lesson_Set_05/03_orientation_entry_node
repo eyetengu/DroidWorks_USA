@@ -1,174 +1,343 @@
 #!/usr/bin/env python3
+"""
+DroidWorks U.S.A. — Orientation Entry Node (GY-521 only)
+Serial reader for the orientation Nano.
 
+MCU line format (still accepted):
+  TILT:0 SHOCK:0 AX:0.02 AY:-0.01 AZ:0.98
+
+Switch fields are ignored. Tilt and shock are derived from the accelerometer:
+  /tilt_state   |roll| or |pitch| > tilt_threshold_deg
+  /shock_state  |a| magnitude > shock_threshold_g  (brief pulse)
+
+Publishes:
+  /tilt_state, /shock_state
+  /orientation_x, /orientation_y   (roll, pitch degrees)
+  /accel_x, /accel_y, /accel_z
+"""
+
+import json
 import math
 import re
+import time
+
 import serial
+import serial.tools.list_ports
 
 import rclpy
 from rclpy.node import Node
-
-from std_msgs.msg import Bool, Float32
+from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
+from std_msgs.msg import Bool, Float32, String
 
 
 LINE_RE = re.compile(
-    r"TILT:(\d+)\s+"
-    r"SHOCK:(\d+)\s+"
-    r"AX:([-+]?\d+(?:\.\d+)?)\s+"
-    r"AY:([-+]?\d+(?:\.\d+)?)\s+"
-    r"AZ:([-+]?\d+(?:\.\d+)?)"
+    r'(?:TILT:\d+\s+SHOCK:\d+\s+)?'   # optional legacy switch fields
+    r'AX:([-+]?\d+(?:\.\d+)?)\s+'
+    r'AY:([-+]?\d+(?:\.\d+)?)\s+'
+    r'AZ:([-+]?\d+(?:\.\d+)?)'
 )
+
+ORIENT_SIGNATURE = re.compile(r'AX:[-+]?\d')
 
 
 class OrientationEntryNode(Node):
-
     def __init__(self):
         super().__init__('orientation_entry')
 
-        self.declare_parameter('port', '/dev/ttyUSB2')
+        self.declare_parameter('port', 'auto')
         self.declare_parameter('baud', 115200)
+        self.declare_parameter('match_eid', '')
+        self.declare_parameter('match_type', 'ORIENT')
+        self.declare_parameter('match_sensor', 'ORIENT|IMU|GY|MPU')
+        self.declare_parameter('probe_timeout_s', 2.0)
+        self.declare_parameter('rescan_period_s', 3.0)
 
-        port = self.get_parameter('port').value
-        baud = self.get_parameter('baud').value
+        # Derived thresholds
+        self.declare_parameter('tilt_threshold_deg', 15.0)
+        self.declare_parameter('shock_threshold_g', 2.0)
+        self.declare_parameter('shock_hold_s', 0.25)
+
+        self.port_param = str(self.get_parameter('port').value).strip()
+        self.baud = int(self.get_parameter('baud').value)
+        self.match_eid = str(self.get_parameter('match_eid').value).strip()
+        self.match_type = str(self.get_parameter('match_type').value).strip().upper()
+        self.match_sensor = str(self.get_parameter('match_sensor').value).strip().upper()
+        self.probe_timeout_s = float(self.get_parameter('probe_timeout_s').value)
+        self.rescan_period_s = float(self.get_parameter('rescan_period_s').value)
+
+        self.tilt_threshold_deg = float(self.get_parameter('tilt_threshold_deg').value)
+        self.shock_threshold_g = float(self.get_parameter('shock_threshold_g').value)
+        self.shock_hold_s = float(self.get_parameter('shock_hold_s').value)
+
+        self.serial = None
+        self.active_port = None
+        self._assigned_port = None
+        self._last_rescan = 0.0
+        self._map_received = False
+        self._shock_until = 0.0
+
+        self.tilt_pub = self.create_publisher(Bool, '/tilt_state', 5)
+        self.shock_pub = self.create_publisher(Bool, '/shock_state', 2)
+        self.orientation_x_pub = self.create_publisher(Float32, '/orientation_x', 10)
+        self.orientation_y_pub = self.create_publisher(Float32, '/orientation_y', 10)
+        self.accel_x_pub = self.create_publisher(Float32, '/accel_x', 10)
+        self.accel_y_pub = self.create_publisher(Float32, '/accel_y', 10)
+        self.accel_z_pub = self.create_publisher(Float32, '/accel_z', 10)
+
+        qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+
+        self.create_subscription(  String, '/hardware/device_map', self._cb_device_map, qos    )
+
+        self.create_timer(0.02, self._tick)
 
         self.get_logger().info(
-            f'Opening orientation controller on {port} @ {baud}'
+            f'Orientation entry ready (GY-521 derived tilt/shock)  '
+            f'port={self.port_param!r}  match_type={self.match_type!r}'
+        )
+        self.get_logger().info(
+            f'Tilt threshold={self.tilt_threshold_deg}°  '
+            f'Shock threshold={self.shock_threshold_g}g'
         )
 
-        self.serial = serial.Serial(
-            port=port,
-            baudrate=baud,
-            timeout=0.1
-        )
-
-        self.tilt_pub = self.create_publisher(
-            Bool,
-            '/tilt_state',
-            10
-        )
-
-        self.shock_pub = self.create_publisher(
-            Bool,
-            '/shock_state',
-            10
-        )
-
-        self.orientation_x_pub = self.create_publisher(
-            Float32,
-            '/orientation_x',
-            10
-        )
-
-        self.orientation_y_pub = self.create_publisher(
-            Float32,
-            '/orientation_y',
-            10
-        )
-
-        self.accel_x_pub = self.create_publisher(
-            Float32,
-            '/accel_x',
-            10
-        )
-
-        self.accel_y_pub = self.create_publisher(
-            Float32,
-            '/accel_y',
-            10
-        )
-
-        self.accel_z_pub = self.create_publisher(
-            Float32,
-            '/accel_z',
-            10
-        )
-
-        self.timer = self.create_timer(0.01, self.read_serial)
-
-    def read_serial(self):
-
+    # ----- device map -------------------------------------------------
+    def _cb_device_map(self, msg: String):
+        self._map_received = True
         try:
-            line = self.serial.readline().decode(
-                'utf-8',
-                errors='ignore'
-            ).strip()
+            device_map = json.loads(msg.data)
+        except json.JSONDecodeError as e:
+            self.get_logger().warn(f'Bad device_map JSON: {e}')
+            return
+        if not isinstance(device_map, dict):
+            return
 
-        except Exception as exc:
-            self.get_logger().error(
-                f'Serial read error: {exc}'
+        chosen = self._pick_from_map(device_map)
+        if chosen is None:
+            if not self._assigned_port:
+                self.get_logger().info(
+                    'device_map received but no orientation match '
+                    f'(keys={list(device_map.keys())})'
+                )
+            return
+
+        port = chosen.get('port', '')
+        eid = chosen.get('eid', '')
+        if not port.startswith('/dev/'):
+            return
+
+        if port != self._assigned_port:
+            self.get_logger().info(
+                f'Assigned from device_map: EID={eid}  '
+                f'TYPE={chosen.get("type")}  SENSOR={chosen.get("sensor")}  '
+                f'PORT={port}'
             )
+            self._assigned_port = port
+            self._close_serial()
+
+    def _pick_from_map(self, device_map: dict):
+        sensor_tokens = [
+            t.strip() for t in self.match_sensor.split('|') if t.strip()
+        ]
+
+        if self.match_eid:
+            for key, dev in device_map.items():
+                if not isinstance(dev, dict):
+                    continue
+                if str(dev.get('eid', key)) == self.match_eid:
+                    return dev
+
+        for key, dev in device_map.items():
+            if not isinstance(dev, dict):
+                continue
+            dtype = str(dev.get('type', '')).upper()
+            sensor = str(dev.get('sensor', '')).upper()
+            sensor2 = str(dev.get('sensor2', '')).upper()
+            blob = f'{dtype} {sensor} {sensor2}'
+
+            if self.match_type and self.match_type in dtype:
+                return dev
+            for tok in sensor_tokens:
+                if tok and tok in blob:
+                    return dev
+        return None
+
+    # ----- serial lifecycle -------------------------------------------
+    def _close_serial(self):
+        if self.serial is not None:
+            try:
+                if self.serial.is_open:
+                    self.serial.close()
+            except Exception:
+                pass
+        self.serial = None
+        self.active_port = None
+
+    def _open_port(self, path: str) -> bool:
+        try:
+            ser = serial.Serial(port=path, baudrate=self.baud, timeout=0.05)
+            time.sleep(0.2)
+            self.serial = ser
+            self.active_port = path
+            self.get_logger().info(f'Serial opened: {path} @ {self.baud}')
+            return True
+        except serial.SerialException as e:
+            self.get_logger().warn(f'Could not open {path}: {e}')
+            self.serial = None
+            self.active_port = None
+            return False
+
+    def _looks_like_orientation(self, ser, timeout_s: float) -> bool:
+        deadline = time.monotonic() + timeout_s
+        buf = ''
+        while time.monotonic() < deadline:
+            try:
+                n = ser.in_waiting
+                if n:
+                    chunk = ser.read(n).decode('utf-8', errors='ignore')
+                    buf += chunk
+                    if ORIENT_SIGNATURE.search(buf):
+                        return True
+                    if len(buf) > 2000:
+                        buf = buf[-500:]
+            except serial.SerialException:
+                return False
+            time.sleep(0.02)
+        return False
+
+    def _auto_detect(self):
+        candidates = [
+            p.device
+            for p in serial.tools.list_ports.comports()
+            if ('ttyUSB' in p.device or 'ttyACM' in p.device)
+        ]
+        if not candidates:
+            return None
+        self.get_logger().info(f'Auto-detect probing: {candidates}')
+        for dev in candidates:
+            ser = None
+            try:
+                ser = serial.Serial(port=dev, baudrate=self.baud, timeout=0.05)
+                time.sleep(0.2)
+                if self._looks_like_orientation(ser, self.probe_timeout_s):
+                    self.get_logger().info(f'Auto-detect: orientation on {dev}')
+                    ser.close()
+                    return dev
+                ser.close()
+            except serial.SerialException:
+                if ser is not None:
+                    try:
+                        ser.close()
+                    except Exception:
+                        pass
+        self.get_logger().warn('Auto-detect: no orientation signature found')
+        return None
+
+    def _ensure_connected(self):
+        if self.serial is not None and self.serial.is_open:
             return
 
-        if not line:
+        now = time.monotonic()
+        if (now - self._last_rescan) < self.rescan_period_s:
             return
+        self._last_rescan = now
 
+        target = None
+        # 1) device_map wins
+        if self._assigned_port:
+            target = self._assigned_port
+        # 2) explicit launch/parameter port
+        elif self.port_param and self.port_param.lower() not in ('auto', ''):
+            target = self.port_param
+            self.get_logger().info(f'Using parameter port: {target}')
+        # 3) last resort auto-detect
+        elif self.port_param.lower() in ('auto', ''):
+            if self._map_received or now > 8.0:
+                target = self._auto_detect()
+
+        if target:
+            self._open_port(target)
+
+    # ----- main loop --------------------------------------------------
+    def _tick(self):
+        self._ensure_connected()
+        if self.serial is None or not self.serial.is_open:
+            return
+        try:
+            while self.serial.in_waiting > 0:
+                raw = self.serial.readline()
+                if not raw:
+                    break
+                line = raw.decode('utf-8', errors='ignore').strip()
+                if line:
+                    self._handle_line(line)
+        except serial.SerialException as e:
+            self.get_logger().error(
+                f'Serial read error on {self.active_port}: {e}'
+            )
+            self._close_serial()
+
+    def _handle_line(self, line: str):
         match = LINE_RE.search(line)
-
         if not match:
             return
 
-        tilt_raw, shock_raw, ax, ay, az = match.groups()
+        ax_s, ay_s, az_s = match.groups()
+        ax = float(ax_s)
+        ay = float(ay_s)
+        az = float(az_s)
 
-        tilt = bool(int(tilt_raw))
-        shock = bool(int(shock_raw))
-
-        ax = float(ax)
-        ay = float(ay)
-        az = float(az)
-
-        # Calculate static orientation from gravity vector.
-        roll = math.degrees(
-            math.atan2(ay, az)
-        )
-
+        # orientation
+        roll = math.degrees(math.atan2(ay, az))
         pitch = math.degrees(
-            math.atan2(
-                -ax,
-                math.sqrt(ay * ay + az * az)
-            )
+            math.atan2(-ax, math.sqrt(ay * ay + az * az))
         )
 
-        msg = Bool()
-        msg.data = tilt
-        self.tilt_pub.publish(msg)
+        # derived tilt
+        tilt = (
+            abs(roll) > self.tilt_threshold_deg
+            or abs(pitch) > self.tilt_threshold_deg
+        )
 
-        msg = Bool()
-        msg.data = shock
-        self.shock_pub.publish(msg)
+        # derived shock (magnitude spike, held briefly)
+        mag = math.sqrt(ax * ax + ay * ay + az * az)
+        now = time.monotonic()
+        if mag > self.shock_threshold_g:
+            self._shock_until = now + self.shock_hold_s
+        shock = now < self._shock_until
 
-        msg = Float32()
-        msg.data = roll
-        self.orientation_x_pub.publish(msg)
+        # publish
+        m = Bool()
+        m.data = tilt
+        self.tilt_pub.publish(m)
 
-        msg = Float32()
-        msg.data = pitch
-        self.orientation_y_pub.publish(msg)
+        m = Bool()
+        m.data = shock
+        self.shock_pub.publish(m)
 
-        msg = Float32()
-        msg.data = ax
-        self.accel_x_pub.publish(msg)
-
-        msg = Float32()
-        msg.data = ay
-        self.accel_y_pub.publish(msg)
-
-        msg = Float32()
-        msg.data = az
-        self.accel_z_pub.publish(msg)
+        for pub, val in (
+            (self.orientation_x_pub, roll),
+            (self.orientation_y_pub, pitch),
+            (self.accel_x_pub, ax),
+            (self.accel_y_pub, ay),
+            (self.accel_z_pub, az),
+        ):
+            fm = Float32()
+            fm.data = val
+            pub.publish(fm)
 
 
 def main(args=None):
     rclpy.init(args=args)
-
     node = OrientationEntryNode()
-
     try:
         rclpy.spin(node)
-
     except KeyboardInterrupt:
         pass
-
     finally:
-        node.serial.close()
+        node._close_serial()
         node.destroy_node()
         rclpy.shutdown()
 
