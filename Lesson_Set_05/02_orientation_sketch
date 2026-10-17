@@ -1,301 +1,808 @@
-/*
- * DW_005_Orientation_Shock_Tilt_Nano_millis_SERIAL.ino
- * DroidWorks U.S.A. — Lesson Set 04 (Orientation / Shock / Tilt)
- *
- * Single Arduino Nano + GY-521 (MPU-6050) + Tilt switch + Shock switch
- *
- * Added:
- *   - Reads DroidWorks identity from EEPROM
- *   - Broadcasts EID / TYPE / SENSOR / SENSOR2 at startup
- *
- * EEPROM layout:
- *   EID     = address 0
- *   TYPE    = address 32
- *   SENSOR  = address 64
- *   SENSOR2 = address 96
- *
- * Serial:
- *   115200 baud
- *
- * Runtime telemetry:
- *   TILT:0 SHOCK:0 AX:0.02 AY:-0.01 AZ:0.98
- */
+/*******************************************************************
+  DroidWorks USA - CYD Face + Debug Surface  v0.4
+  ESP32-2432S028 (Cheap Yellow Display) — classic ESP32, NOT S3
 
-#include <Wire.h>
-#include <EEPROM.h>
+  Portrait face is home. Debug pages remain available.
 
-// ---- EEPROM layout ----
-const int EID_ADDR     = 0;
-const int TYPE_ADDR    = 32;
-const int SENSOR_ADDR  = 64;
-const int SENSOR2_ADDR = 96;
+  Pages:
+    0  Face         - eyes / distance / orientation (portrait)
+    1  Nodes        - expected ROS nodes, up / down
+    2  Topics       - key topics, active + last value
+    3  Motion       - PIR / RCWL / fused
+    4  Orientation  - tilt / shock / roll / pitch
+    5  Radar        - ToF beam + US cone
+    6  System       - link / uptime / packets
 
-// ---- Pins ----
-const uint8_t PIN_SHOCK = 4;
-const uint8_t PIN_TILT  = 5;
+  Touch (portrait):
+    tap left 1/3  = previous page
+    tap right 1/3 = next page
+    hold ~1s      = jump to Face
 
-// ---- MPU-6050 ----
-const uint8_t MPU_ADDR = 0x68;
-const unsigned long IMU_INTERVAL_MS = 40;
+  Board (Arduino IDE / PlatformIO):
+    Board: ESP32 Dev Module
+    Upload speed: 921600 (or 460800 if flaky)
+    Flash: 4MB (minimum)
+    PSRAM: disabled (classic CYD has none)
 
-// ---- Switch debounce ----
-const unsigned long DEBOUNCE_MS = 25;
+  Libraries:
+    TFT_eSPI (CYD User_Setup / ILI9341)
+    XPT2046_Touchscreen
+    PubSubClient
+    ArduinoJson
 
-// ---- Serial ----
-const unsigned long BAUD = 115200;
-const unsigned long PRINT_INTERVAL_MS = 100;
+  Needs: dw_logo.h next to this sketch
+ *******************************************************************/
 
-// ---- State ----
-bool lastTilt   = false;
-bool lastShock  = false;
-bool stableTilt = false;
-bool stableShock = false;
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+#include <TFT_eSPI.h>
+#include <XPT2046_Touchscreen.h>
+#include <math.h>
+#include "dw_logo.h"
 
-unsigned long lastTiltChangeMs  = 0;
-unsigned long lastShockChangeMs = 0;
-unsigned long lastImuMs         = 0;
-unsigned long lastPrintMs       = 0;
+// ===================== USER CONFIG =====================
+const char* WIFI_SSID      = "XXXXXXXX";
+const char* WIFI_PASSWORD  = "XXXXXXXX!";
+const char* MQTT_HOST      = "192.168.X.XXX";   // Pi IP
+const uint16_t MQTT_PORT   = 1883;
+const char* MQTT_TOPIC     = "droidworks/debug/status";
+const char* MQTT_CLIENT_ID = "cyd_debug_surface";
 
-float ax = 0.0f;
-float ay = 0.0f;
-float az = 0.0f;
+// Portrait: 0 = USB bottom-ish (typical upright), 2 = flipped
+#define DISPLAY_ROTATION 0
 
+#define LINK_STALE_MS  3000
+#define LINK_DEAD_MS   8000
+#define FULL_REFRESH_MS      30000
+#define VOLATILE_REFRESH_MS    400
 
-// --------------------------------------------------
-// Read a null-terminated string from EEPROM
-// --------------------------------------------------
+// Portrait geometry after setRotation(0 or 2)
+#define SCR_W  240
+#define SCR_H  320
+// =======================================================
 
-void readEEPROMString(
-  int address,
-  char* buffer,
-  int bufferSize
-)
-{
-  int i = 0;
+// -------------------- Touch (CYD XPT2046) --------------------
+#define XPT2046_IRQ  36
+#define XPT2046_MOSI 32
+#define XPT2046_MISO 39
+#define XPT2046_CLK  25
+#define XPT2046_CS   33
 
-  for (; i < bufferSize - 1; i++)
-  {
-    char c = EEPROM.read(address + i);
+SPIClass touchSPI = SPIClass(VSPI);
+XPT2046_Touchscreen ts(XPT2046_CS, XPT2046_IRQ);
 
-    if (c == '\0')
-    {
-      break;
-    }
+TFT_eSPI tft = TFT_eSPI();
+WiFiClient wifiClient;
+PubSubClient mqtt(wifiClient);
 
-    buffer[i] = c;
-  }
+// -------------------- Pages --------------------
+enum Page : uint8_t {
+  PAGE_FACE = 0,
+  PAGE_NODES,
+  PAGE_TOPICS,
+  PAGE_MOTION,
+  PAGE_ORIENTATION,
+  PAGE_RADAR,
+  PAGE_SYSTEM,
+  PAGE_COUNT
+};
 
-  buffer[i] = '\0';
-}
+const char* PAGE_NAMES[PAGE_COUNT] = {
+  "Face",
+  "Nodes",
+  "Topics",
+  "Motion",
+  "Orientation",
+  "Radar",
+  "System"
+};
 
+#define RADAR_MAX_CM  200
 
-// --------------------------------------------------
-// Broadcast DroidWorks identity
-// --------------------------------------------------
+uint8_t currentPage = PAGE_FACE;
+bool    fullDirty   = true;
+bool    dataDirty   = false;
 
-void broadcastIdentity()
-{
-  char eid[32];
-  char type[32];
-  char sensor[32];
-  char sensor2[32];
+uint32_t lastFullRedrawMs     = 0;
+uint32_t lastVolatileRedrawMs = 0;
 
-  readEEPROMString(EID_ADDR, eid, sizeof(eid));
-  readEEPROMString(TYPE_ADDR, type, sizeof(type));
-  readEEPROMString(SENSOR_ADDR, sensor, sizeof(sensor));
-  readEEPROMString(SENSOR2_ADDR, sensor2, sizeof(sensor2));
+// -------------------- Live data --------------------
+struct DebugData {
+  char     affectState[16] = "CALM";
+  uint8_t  level           = 0;
+  uint8_t  vigilancePct    = 0;
 
-  Serial.print(F("EID:"));
-  Serial.print(eid);
+  bool pirActive   = false;
+  bool rcwlActive  = false;
+  bool fusedMotion = false;
 
-  Serial.print(F(",TYPE:"));
-  Serial.print(type);
+  bool  shockLatched = false;
+  bool  tiltActive   = false;
+  float tiltX        = 0.0f;   // roll deg
+  float tiltY        = 0.0f;   // pitch deg
 
-  Serial.print(F(",SENSOR:"));
-  Serial.print(sensor);
+  uint16_t beamCm = 0;         // ToF
+  uint16_t coneCm = 0;         // Ultrasonic
+  uint16_t wallCm = 0;
 
-  Serial.print(F(",SENSOR2:"));
-  Serial.println(sensor2);
-}
+  char     oledExpr[24] = "CALM";
+  uint32_t lastPacketMs = 0;
+  uint32_t packetCount  = 0;
+  bool     linkUp       = false;
 
+  // Liveness hints (set once we see real sensor data)
+  bool sawMotion = false;
+  bool sawTof    = false;
+  bool sawUs     = false;
+  bool sawOrient = false;
+  bool sawAffect = false;
+} data;
 
-// --------------------------------------------------
-// MPU helpers
-// --------------------------------------------------
+// -------------------- Touch --------------------
+uint32_t touchDownMs    = 0;
+bool     touchWasDown   = false;
+int16_t  touchStartX    = 0;
+#define TOUCH_DEBOUNCE_MS  180
+uint32_t lastTouchNavMs = 0;
 
-void mpuWrite(uint8_t reg, uint8_t data)
-{
-  Wire.beginTransmission(MPU_ADDR);
-  Wire.write(reg);
-  Wire.write(data);
-  Wire.endTransmission();
-}
+#define TOUCH_X_MIN 200
+#define TOUCH_X_MAX 3700
+#define TOUCH_Y_MIN 240
+#define TOUCH_Y_MAX 3800
 
-
-bool mpuReadAccel(float &x, float &y, float &z)
-{
-  Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x3B);
-
-  if (Wire.endTransmission(false) != 0)
-    return false;
-
-  if (Wire.requestFrom(MPU_ADDR, (uint8_t)6) != 6)
-    return false;
-
-  int16_t rawX = (Wire.read() << 8) | Wire.read();
-  int16_t rawY = (Wire.read() << 8) | Wire.read();
-  int16_t rawZ = (Wire.read() << 8) | Wire.read();
-
-  const float scale = 16384.0f;
-
-  x = rawX / scale;
-  y = rawY / scale;
-  z = rawZ / scale;
-
+bool readTouch(int16_t &x, int16_t &y) {
+  if (!ts.touched()) return false;
+  TS_Point p = ts.getPoint();
+  // Map into portrait space
+  x = map(p.x, TOUCH_X_MIN, TOUCH_X_MAX, 0, SCR_W);
+  y = map(p.y, TOUCH_Y_MIN, TOUCH_Y_MAX, 0, SCR_H);
+  x = constrain(x, 0, SCR_W - 1);
+  y = constrain(y, 0, SCR_H - 1);
   return true;
 }
 
+// -------------------- MQTT --------------------
+void applyStatusJson(const char* json) {
+  StaticJsonDocument<512> doc;
+  DeserializationError err = deserializeJson(doc, json);
+  if (err) return;
 
-// --------------------------------------------------
-// Setup
-// --------------------------------------------------
+  char newAffect[16];
+  const char* aff = doc["affect"] | "CALM";
+  strncpy(newAffect, aff, sizeof(newAffect) - 1);
+  newAffect[sizeof(newAffect) - 1] = '\0';
 
-void setup()
-{
-  pinMode(PIN_SHOCK, INPUT_PULLUP);
-  pinMode(PIN_TILT, INPUT_PULLUP);
+  uint8_t newLevel = (uint8_t)(doc["level"] | 0);
+  uint8_t newVig   = (uint8_t)constrain((int)(doc["vigilance"] | 0), 0, 100);
+  bool newPir      = doc["pir"]   | false;
+  bool newRcwl     = doc["rcwl"]  | false;
+  bool newFused    = doc["fused"] | false;
+  bool newShock    = doc["shock"] | false;
+  bool newTilt     = doc["tilt"]  | false;
 
-  Wire.begin();
-  Wire.setClock(400000);
+  // Live debug-exit keys; fall back to legacy names
+  float newTiltX = 0.0f;
+  float newTiltY = 0.0f;
+  if (doc.containsKey("orientation_x")) newTiltX = doc["orientation_x"].as<float>();
+  else if (doc.containsKey("tilt_x"))   newTiltX = doc["tilt_x"].as<float>();
+  if (doc.containsKey("orientation_y")) newTiltY = doc["orientation_y"].as<float>();
+  else if (doc.containsKey("tilt_y"))   newTiltY = doc["tilt_y"].as<float>();
 
-  // Wake MPU-6050
-  mpuWrite(0x6B, 0x00);
-  delay(50);
+  // Distance → centimeters for bars
+  // Heuristic: >50 treat as mm, <15 treat as meters, else cm
+  auto rawToCm = [](float v) -> uint16_t {
+    if (v <= 0.0f) return 0;
+    if (v > 50.0f) return (uint16_t)constrain((int)(v / 10.0f + 0.5f), 0, 999);
+    if (v < 15.0f) return (uint16_t)constrain((int)(v * 100.0f + 0.5f), 0, 999);
+    return (uint16_t)constrain((int)(v + 0.5f), 0, 999);
+  };
 
-  Serial.begin(BAUD);
+  float rawBeam = 0.0f;
+  float rawCone = 0.0f;
+  if (doc.containsKey("tof_distance"))           rawBeam = doc["tof_distance"].as<float>();
+  else if (doc.containsKey("beam_cm"))           rawBeam = doc["beam_cm"].as<float>();
+  if (doc.containsKey("ultrasonic_distance"))    rawCone = doc["ultrasonic_distance"].as<float>();
+  else if (doc.containsKey("cone_cm"))           rawCone = doc["cone_cm"].as<float>();
 
-  while (!Serial && millis() < 2000)
-  {
-    ;
-  }
+  uint16_t newBeam = rawToCm(rawBeam);
+  uint16_t newCone = rawToCm(rawCone);
+  uint16_t newWall = (uint16_t)(doc["wall_cm"] | 0);
 
-  delay(1000);
-
-  // DroidWorks identity first.
-  broadcastIdentity();
-
-  Serial.println();
-  Serial.println(
-    F("DW_005 Orientation+Shock+Tilt Nano ready")
-  );
-
-  Serial.println(
-    F("Format: TILT:x SHOCK:y AX:a AY:b AZ:c")
-  );
-
-  Serial.println(
-    F("----------------------------------------")
-  );
-}
-
-
-// --------------------------------------------------
-// Main loop
-// --------------------------------------------------
-
-void loop()
-{
-  unsigned long now = millis();
-
-
-  // ---- Read switches ----
-
-  bool rawTilt =
-    (digitalRead(PIN_TILT) == LOW);
-
-  bool rawShock =
-    (digitalRead(PIN_SHOCK) == LOW);
-
-
-  // ---- Debounce tilt ----
-
-  if (rawTilt != lastTilt)
-  {
-    lastTiltChangeMs = now;
-    lastTilt = rawTilt;
-  }
-
-  if (
-    (now - lastTiltChangeMs) >= DEBOUNCE_MS
-  )
-  {
-    stableTilt = lastTilt;
-  }
-
-
-  // ---- Debounce shock ----
-
-  if (rawShock != lastShock)
-  {
-    lastShockChangeMs = now;
-    lastShock = rawShock;
-  }
-
-  if (
-    (now - lastShockChangeMs) >= DEBOUNCE_MS
-  )
-  {
-    stableShock = lastShock;
-  }
-
-
-  // ---- Read IMU ----
-
-  if (
-    now - lastImuMs >= IMU_INTERVAL_MS
-  )
-  {
-    lastImuMs = now;
-
-    if (!mpuReadAccel(ax, ay, az))
-    {
-      // Keep previous values.
-    }
-  }
-
-
-  // ---- Print telemetry ----
-
-  static bool lastPrintedTilt  = false;
-  static bool lastPrintedShock = false;
+  char newExpr[24];
+  const char* expr = doc["oled_expr"] | newAffect;
+  strncpy(newExpr, expr, sizeof(newExpr) - 1);
+  newExpr[sizeof(newExpr) - 1] = '\0';
 
   bool changed =
-    (stableTilt != lastPrintedTilt) ||
-    (stableShock != lastPrintedShock);
+      (strcmp(newAffect, data.affectState) != 0) ||
+      (newLevel != data.level) ||
+      (newVig   != data.vigilancePct) ||
+      (newPir   != data.pirActive) ||
+      (newRcwl  != data.rcwlActive) ||
+      (newFused != data.fusedMotion) ||
+      (newShock != data.shockLatched) ||
+      (newTilt  != data.tiltActive) ||
+      (fabsf(newTiltX - data.tiltX) > 0.5f) ||
+      (fabsf(newTiltY - data.tiltY) > 0.5f) ||
+      (newBeam  != data.beamCm) ||
+      (newCone  != data.coneCm) ||
+      (strcmp(newExpr, data.oledExpr) != 0);
 
-  if (
-    changed ||
-    (now - lastPrintMs >= PRINT_INTERVAL_MS)
-  )
-  {
-    Serial.print(F("TILT:"));
-    Serial.print(stableTilt ? 1 : 0);
+  strncpy(data.affectState, newAffect, sizeof(data.affectState) - 1);
+  data.level         = newLevel;
+  data.vigilancePct  = newVig;
+  data.pirActive     = newPir;
+  data.rcwlActive    = newRcwl;
+  data.fusedMotion   = newFused;
+  data.shockLatched  = newShock;
+  data.tiltActive    = newTilt;
+  data.tiltX         = newTiltX;
+  data.tiltY         = newTiltY;
+  data.beamCm        = newBeam;
+  data.coneCm        = newCone;
+  data.wallCm        = newWall;
+  strncpy(data.oledExpr, newExpr, sizeof(data.oledExpr) - 1);
 
-    Serial.print(F(" SHOCK:"));
-    Serial.print(stableShock ? 1 : 0);
+  data.lastPacketMs = millis();
+  data.packetCount++;
+  data.linkUp = true;
 
-    Serial.print(F(" AX:"));
-    Serial.print(ax, 2);
+  if (newPir || newRcwl || newFused) data.sawMotion = true;
+  if (newBeam > 0) data.sawTof = true;
+  if (newCone > 0) data.sawUs = true;
+  if (fabsf(newTiltX) > 0.2f || fabsf(newTiltY) > 0.2f || newTilt || newShock)
+    data.sawOrient = true;
+  if (newAffect[0]) data.sawAffect = true;
 
-    Serial.print(F(" AY:"));
-    Serial.print(ay, 2);
+  if (changed) dataDirty = true;
+}
 
-    Serial.print(F(" AZ:"));
-    Serial.println(az, 2);
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  char buf[512];
+  if (length >= sizeof(buf)) length = sizeof(buf) - 1;
+  memcpy(buf, payload, length);
+  buf[length] = '\0';
+  applyStatusJson(buf);
+}
 
-    lastPrintedTilt  = stableTilt;
-    lastPrintedShock = stableShock;
-    lastPrintMs = now;
+bool mqttReconnect() {
+  if (mqtt.connected()) return true;
+  Serial.print("MQTT connect...");
+  if (mqtt.connect(MQTT_CLIENT_ID)) {
+    Serial.println("ok");
+    mqtt.subscribe(MQTT_TOPIC);
+    return true;
   }
+  Serial.print("fail rc=");
+  Serial.println(mqtt.state());
+  return false;
+}
+
+void ensureNetwork() {
+  if (WiFi.status() != WL_CONNECTED) {
+    if (data.linkUp) {
+      data.linkUp = false;
+      dataDirty = true;
+    }
+    static uint32_t lastAttempt = 0;
+    if (millis() - lastAttempt < 5000) return;
+    lastAttempt = millis();
+    WiFi.disconnect();
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    return;
+  }
+  if (!mqtt.connected()) {
+    static uint32_t lastMqttTry = 0;
+    if (millis() - lastMqttTry < 3000) return;
+    lastMqttTry = millis();
+    mqttReconnect();
+  }
+}
+
+// -------------------- Shared chrome --------------------
+uint16_t affectColor(const char* state) {
+  if (strcasecmp(state, "CALM")    == 0) return TFT_CYAN;
+  if (strcasecmp(state, "ALERT")   == 0) return TFT_YELLOW;
+  if (strcasecmp(state, "FOCUSED") == 0) return TFT_GREEN;
+  if (strcasecmp(state, "WARY")    == 0) return TFT_ORANGE;
+  if (strcasecmp(state, "GUARDED") == 0 || strcasecmp(state, "STOP") == 0) return TFT_RED;
+  return TFT_WHITE;
+}
+
+void drawHeader(const char* title) {
+  tft.fillRect(0, 0, SCR_W, 22, TFT_NAVY);
+  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.setTextDatum(TL_DATUM);
+  tft.drawString("DW", 6, 4, 2);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(title, SCR_W - 6, 4, 2);
+}
+
+void drawPageDots() {
+  const int baseX = SCR_W / 2 - ((PAGE_COUNT - 1) * 9);
+  const int y = SCR_H - 10;
+  for (uint8_t i = 0; i < PAGE_COUNT; i++) {
+    uint16_t color = (i == currentPage) ? TFT_CYAN : TFT_DARKGREY;
+    tft.fillCircle(baseX + i * 18, y, 3, color);
+  }
+}
+
+void drawLinkChip() {
+  tft.fillRect(SCR_W - 72, 24, 68, 12, TFT_BLACK);
+  uint32_t age = millis() - data.lastPacketMs;
+  tft.setTextDatum(TR_DATUM);
+  if (!data.linkUp || age > LINK_DEAD_MS) {
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+    tft.drawString("NO LINK", SCR_W - 6, 26, 1);
+  } else if (age > LINK_STALE_MS) {
+    tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+    tft.drawString("STALE", SCR_W - 6, 26, 1);
+  } else {
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    tft.drawString("LIVE", SCR_W - 6, 26, 1);
+  }
+}
+
+// =====================================================================
+// FACE PAGE  (portrait primary)
+// Zones (top → bottom):
+//   Eyes        y ~ 28..120
+//   Distance    y ~ 130..210
+//   Orientation y ~ 220..300
+// =====================================================================
+void drawEye(int cx, int cy, int w, int h, bool open, uint16_t color) {
+  if (open) {
+    tft.fillRoundRect(cx - w / 2, cy - h / 2, w, h, h / 3, color);
+  } else {
+    // closed = thin lid line
+    tft.fillRoundRect(cx - w / 2, cy - 3, w, 6, 3, TFT_DARKGREY);
+  }
+}
+
+void drawFaceEyes() {
+  // clear eye band
+  tft.fillRect(0, 28, SCR_W, 95, TFT_BLACK);
+
+  // left = PIR, right = RCWL
+  const int leftCx  = 70;
+  const int rightCx = 170;
+  const int cy      = 70;
+  const int openW   = 52;
+  const int openH   = 40;
+
+  uint16_t col = affectColor(data.affectState);
+  drawEye(leftCx,  cy, openW, openH, data.pirActive,  col);
+  drawEye(rightCx, cy, openW, openH, data.rcwlActive, col);
+
+  // small labels
+  tft.setTextDatum(TC_DATUM);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.drawString("PIR", leftCx, 96, 1);
+  tft.drawString("RCWL", rightCx, 96, 1);
+
+  // affect tag under eyes
+  tft.setTextDatum(TC_DATUM);
+  tft.setTextColor(col, TFT_BLACK);
+  tft.drawString(data.oledExpr[0] ? data.oledExpr : data.affectState, SCR_W / 2, 110, 2);
+}
+
+void drawDistanceBar(int y, const char* label, uint16_t cm, uint16_t color) {
+  const int x0 = 12;
+  const int barW = SCR_W - 24;
+  const int barH = 14;
+
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(TFT_SILVER, TFT_BLACK);
+  tft.drawString(label, x0, y - 14, 1);
+
+  // track
+  tft.drawRect(x0, y, barW, barH, TFT_DARKGREY);
+  tft.fillRect(x0 + 1, y + 1, barW - 2, barH - 2, TFT_BLACK);
+
+  if (cm > 0) {
+    // Range bar: farther = fuller (reads as "how much room ahead")
+    // Close object → short bar; clear path → long bar
+    uint16_t clamped = cm > RADAR_MAX_CM ? RADAR_MAX_CM : cm;
+    int fill = map(clamped, 0, RADAR_MAX_CM, 4, barW - 2);
+    fill = constrain(fill, 4, barW - 2);
+    tft.fillRect(x0 + 1, y + 1, fill, barH - 2, color);
+  }
+
+  char buf[24];
+  if (cm == 0) snprintf(buf, sizeof(buf), "—");
+  else         snprintf(buf, sizeof(buf), "%u cm", cm);
+  tft.setTextDatum(TR_DATUM);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(buf, SCR_W - 12, y - 14, 1);
+}
+
+void drawFaceDistance() {
+  tft.fillRect(0, 128, SCR_W, 88, TFT_BLACK);
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.drawString("DISTANCE", 12, 130, 1);
+
+  drawDistanceBar(158, "ToF", data.beamCm, TFT_CYAN);
+  drawDistanceBar(196, "US",  data.coneCm, TFT_GREENYELLOW);
+}
+
+void drawFaceOrientation() {
+  tft.fillRect(0, 218, SCR_W, 88, TFT_BLACK);
+
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.drawString("ORIENTATION", 12, 220, 1);
+
+  // numeric roll / pitch
+  char buf[32];
+  snprintf(buf, sizeof(buf), "R %+5.1f", data.tiltX);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(buf, 12, 238, 2);
+
+  snprintf(buf, sizeof(buf), "P %+5.1f", data.tiltY);
+  tft.drawString(buf, 12, 258, 2);
+
+  // Face-local tilt: drive chip from the same R/P numbers on screen
+  // so the chip always matches what you see (15° threshold).
+  const float FACE_TILT_DEG = 15.0f;
+  bool faceTilt =
+      (fabsf(data.tiltX) > FACE_TILT_DEG) ||
+      (fabsf(data.tiltY) > FACE_TILT_DEG);
+
+  // status chips
+  int chipY = 238;
+  int chipX = 130;
+
+  // tilt chip
+  uint16_t tCol = faceTilt ? TFT_ORANGE : TFT_DARKGREY;
+  tft.fillRoundRect(chipX, chipY, 96, 22, 4, tCol);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(faceTilt ? TFT_BLACK : TFT_SILVER, tCol);
+  tft.drawString(faceTilt ? "TILT" : "level", chipX + 48, chipY + 11, 2);
+
+  // shock chip — still from MQTT bool (needs a real impact > ~1.6g)
+  chipY = 266;
+  uint16_t sCol = data.shockLatched ? TFT_RED : TFT_DARKGREY;
+  tft.fillRoundRect(chipX, chipY, 96, 22, 4, sCol);
+  tft.setTextColor(data.shockLatched ? TFT_BLACK : TFT_SILVER, sCol);
+  tft.drawString(data.shockLatched ? "SHOCK" : "stable", chipX + 48, chipY + 11, 2);
+}
+
+void drawFaceFull() {
+  drawHeader("Face");
+  drawLinkChip();
+  drawFaceEyes();
+  drawFaceDistance();
+  drawFaceOrientation();
+}
+
+void drawFaceVolatile() {
+  drawLinkChip();
+  drawFaceEyes();
+  drawFaceDistance();
+  drawFaceOrientation();
+}
+
+// -------------------- Nodes (sparse status) --------------------
+// Inferred from MQTT liveness — not a full ros2 node list.
+// Green = evidence this path is alive; grey = no evidence yet / link down.
+void drawNodeRow(int y, const char* name, bool up) {
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(name, 8, y, 1);
+
+  uint16_t c = up ? TFT_GREEN : TFT_DARKGREY;
+  tft.fillRoundRect(SCR_W - 58, y - 1, 50, 14, 3, c);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(up ? TFT_BLACK : TFT_SILVER, c);
+  tft.drawString(up ? "UP" : "—", SCR_W - 33, y + 6, 1);
+}
+
+void drawNodes() {
+  drawHeader("Nodes");
+  drawLinkChip();
+
+  bool link = data.linkUp;
+  // Rows fit portrait 240px; keep short names
+  drawNodeRow(40,  "hardware_mgr",  link);
+  drawNodeRow(58,  "pir_node",      link && data.sawMotion);
+  drawNodeRow(76,  "rcwl_node",     link && data.sawMotion);
+  drawNodeRow(94,  "tof_node",      link && data.sawTof);
+  drawNodeRow(112, "ultrasonic",    link && data.sawUs);
+  drawNodeRow(130, "orient_entry",  link && data.sawOrient);
+  drawNodeRow(148, "fusion_motion", link && data.sawMotion);
+  drawNodeRow(166, "affect_state",  link && data.sawAffect);
+  drawNodeRow(184, "oled_bridge",   link && data.oledExpr[0]);
+  drawNodeRow(202, "cyd_display",   true);   // this panel
+
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.drawString("inferred from status feed", 8, 280, 1);
+}
+
+void drawNodesVolatile() {
+  drawLinkChip();
+  tft.fillRect(0, 36, SCR_W, 250, TFT_BLACK);
+  drawNodes();
+}
+
+// -------------------- Topics (active + last value) --------------------
+void drawTopicRow(int y, const char* name, bool active, const char* value) {
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(active ? TFT_CYAN : TFT_DARKGREY, TFT_BLACK);
+  tft.drawString(name, 6, y, 1);
+
+  tft.setTextDatum(TR_DATUM);
+  tft.setTextColor(active ? TFT_WHITE : TFT_DARKGREY, TFT_BLACK);
+  tft.drawString(value, SCR_W - 6, y, 1);
+}
+
+void drawTopics() {
+  drawHeader("Topics");
+  drawLinkChip();
+
+  char v[28];
+  bool link = data.linkUp;
+
+  snprintf(v, sizeof(v), "%s", data.affectState);
+  drawTopicRow(40, "/droid_affect", link && data.sawAffect, v);
+
+  snprintf(v, sizeof(v), "%s", data.oledExpr);
+  drawTopicRow(58, "/oled_expr", link && data.oledExpr[0], v);
+
+  snprintf(v, sizeof(v), "%s", data.pirActive ? "true" : "false");
+  drawTopicRow(76, "/pir_state", link, v);
+
+  snprintf(v, sizeof(v), "%s", data.rcwlActive ? "true" : "false");
+  drawTopicRow(94, "/rcwl_state", link, v);
+
+  snprintf(v, sizeof(v), "%s", data.fusedMotion ? "true" : "false");
+  drawTopicRow(112, "/fused_motion", link, v);
+
+  if (data.beamCm > 0) snprintf(v, sizeof(v), "%u cm", data.beamCm);
+  else                 snprintf(v, sizeof(v), "—");
+  drawTopicRow(130, "/tof_distance", link && data.sawTof, v);
+
+  if (data.coneCm > 0) snprintf(v, sizeof(v), "%u cm", data.coneCm);
+  else                 snprintf(v, sizeof(v), "—");
+  drawTopicRow(148, "/ultrasonic", link && data.sawUs, v);
+
+  snprintf(v, sizeof(v), "%+.1f", data.tiltX);
+  drawTopicRow(166, "/orientation_x", link && data.sawOrient, v);
+
+  snprintf(v, sizeof(v), "%+.1f", data.tiltY);
+  drawTopicRow(184, "/orientation_y", link && data.sawOrient, v);
+
+  snprintf(v, sizeof(v), "%s", data.tiltActive ? "true" : "false");
+  drawTopicRow(202, "/tilt_state", link && data.sawOrient, v);
+
+  snprintf(v, sizeof(v), "%s", data.shockLatched ? "true" : "false");
+  drawTopicRow(220, "/shock_state", link && data.sawOrient, v);
+
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.drawString("values via MQTT status", 6, 280, 1);
+}
+
+void drawTopicsVolatile() {
+  drawLinkChip();
+  tft.fillRect(0, 36, SCR_W, 250, TFT_BLACK);
+  drawTopics();
+}
+
+// -------------------- Motion --------------------
+void drawMotion() {
+  drawHeader("Motion");
+  drawLinkChip();
+  tft.setTextDatum(TL_DATUM);
+  const char* labels[] = {"PIR", "RCWL", "FUSED"};
+  bool vals[] = {data.pirActive, data.rcwlActive, data.fusedMotion};
+  for (int i = 0; i < 3; i++) {
+    int y = 50 + i * 50;
+    uint16_t c = vals[i] ? TFT_GREEN : TFT_DARKGREY;
+    tft.fillRoundRect(20, y, SCR_W - 40, 36, 6, c);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(TFT_BLACK, c);
+    tft.drawString(labels[i], SCR_W / 2, y + 18, 2);
+  }
+}
+
+void drawMotionVolatile() { drawMotion(); }
+
+// -------------------- Orientation detail --------------------
+void drawOrientation() {
+  drawHeader("Orientation");
+  drawLinkChip();
+  char buf[40];
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  snprintf(buf, sizeof(buf), "Roll   %+6.1f deg", data.tiltX);
+  tft.drawString(buf, 16, 50, 2);
+  snprintf(buf, sizeof(buf), "Pitch  %+6.1f deg", data.tiltY);
+  tft.drawString(buf, 16, 80, 2);
+
+  tft.setTextColor(data.tiltActive ? TFT_ORANGE : TFT_DARKGREY, TFT_BLACK);
+  tft.drawString(data.tiltActive ? "TILT ACTIVE" : "Tilt quiet", 16, 120, 2);
+  tft.setTextColor(data.shockLatched ? TFT_RED : TFT_DARKGREY, TFT_BLACK);
+  tft.drawString(data.shockLatched ? "SHOCK" : "Shock quiet", 16, 150, 2);
+}
+
+void drawOrientationVolatile() { drawOrientation(); }
+
+// -------------------- Radar (simple bars) --------------------
+void drawRadar() {
+  drawHeader("Radar");
+  drawLinkChip();
+  drawDistanceBar(70,  "ToF beam", data.beamCm, TFT_CYAN);
+  drawDistanceBar(120, "US cone",  data.coneCm, TFT_GREENYELLOW);
+  if (data.wallCm > 0) {
+    char buf[24];
+    snprintf(buf, sizeof(buf), "Wall %u cm", data.wallCm);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextColor(TFT_SILVER, TFT_BLACK);
+    tft.drawString(buf, 12, 160, 2);
+  }
+}
+
+void drawRadarVolatile() { drawRadar(); }
+
+// -------------------- System --------------------
+void drawSystem() {
+  drawHeader("System");
+  drawLinkChip();
+  char buf[48];
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+
+  snprintf(buf, sizeof(buf), "Packets  %lu", (unsigned long)data.packetCount);
+  tft.drawString(buf, 16, 50, 2);
+
+  uint32_t age = data.linkUp ? (millis() - data.lastPacketMs) : 0;
+  snprintf(buf, sizeof(buf), "Age      %lu ms", (unsigned long)age);
+  tft.drawString(buf, 16, 80, 2);
+
+  snprintf(buf, sizeof(buf), "WiFi     %s",
+           WiFi.status() == WL_CONNECTED ? "up" : "down");
+  tft.drawString(buf, 16, 110, 2);
+
+  if (WiFi.status() == WL_CONNECTED) {
+    snprintf(buf, sizeof(buf), "IP %s", WiFi.localIP().toString().c_str());
+    tft.drawString(buf, 16, 140, 2);
+  }
+
+  snprintf(buf, sizeof(buf), "Page %u / %u", currentPage + 1, PAGE_COUNT);
+  tft.drawString(buf, 16, 180, 2);
+}
+
+void drawSystemVolatile() { drawSystem(); }
+
+// -------------------- Dispatch --------------------
+void drawCurrentPageFull() {
+  tft.fillScreen(TFT_BLACK);
+  switch (currentPage) {
+    case PAGE_FACE:        drawFaceFull();        break;
+    case PAGE_NODES:       drawNodes();           break;
+    case PAGE_TOPICS:      drawTopics();          break;
+    case PAGE_MOTION:      drawMotion();          break;
+    case PAGE_ORIENTATION: drawOrientation();     break;
+    case PAGE_RADAR:       drawRadar();           break;
+    case PAGE_SYSTEM:      drawSystem();          break;
+  }
+  drawPageDots();
+  fullDirty = false;
+  dataDirty = false;
+  lastFullRedrawMs = millis();
+  lastVolatileRedrawMs = millis();
+}
+
+void drawCurrentPageVolatile() {
+  switch (currentPage) {
+    case PAGE_FACE:        drawFaceVolatile();        break;
+    case PAGE_NODES:       drawNodesVolatile();       break;
+    case PAGE_TOPICS:      drawTopicsVolatile();      break;
+    case PAGE_MOTION:      drawMotionVolatile();      break;
+    case PAGE_ORIENTATION: drawOrientationVolatile(); break;
+    case PAGE_RADAR:       drawRadarVolatile();       break;
+    case PAGE_SYSTEM:      drawSystemVolatile();      break;
+  }
+  dataDirty = false;
+  lastVolatileRedrawMs = millis();
+}
+
+void nextPage() { currentPage = (currentPage + 1) % PAGE_COUNT; fullDirty = true; }
+void prevPage() { currentPage = (currentPage == 0) ? PAGE_COUNT - 1 : currentPage - 1; fullDirty = true; }
+void goHome()   { currentPage = PAGE_FACE; fullDirty = true; }
+
+// -------------------- Setup / Loop --------------------
+void setup() {
+  Serial.begin(115200);
+  delay(100);
+  Serial.println("\nDroidWorks CYD Face + Debug v0.4 (portrait)");
+
+  tft.init();
+  tft.setRotation(DISPLAY_ROTATION);
+  tft.fillScreen(TFT_BLACK);
+
+  touchSPI.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
+  ts.begin(touchSPI);
+  ts.setRotation(DISPLAY_ROTATION);
+
+  // splash
+  int logoX = (SCR_W - DW_LOGO_W) / 2;
+  int logoY = (SCR_H - DW_LOGO_H) / 2 - 20;
+  tft.pushImage(logoX, logoY, DW_LOGO_W, DW_LOGO_H, dw_logo);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(TFT_SILVER, TFT_BLACK);
+  tft.drawString("Face v0.4", SCR_W / 2, logoY + DW_LOGO_H + 18, 2);
+  tft.drawString("connecting...", SCR_W / 2, logoY + DW_LOGO_H + 38, 1);
+
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  uint32_t wifiStart = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < 15000) {
+    delay(400);
+  }
+
+  mqtt.setServer(MQTT_HOST, MQTT_PORT);
+  mqtt.setCallback(mqttCallback);
+  mqtt.setBufferSize(512);
+  mqttReconnect();
+
+  fullDirty = true;
+}
+
+void loop() {
+  ensureNetwork();
+  mqtt.loop();
+
+  if (data.linkUp && (millis() - data.lastPacketMs > LINK_DEAD_MS)) {
+    data.linkUp = false;
+    dataDirty = true;
+  }
+
+  static bool wasStale = false;
+  bool isStale = data.linkUp && (millis() - data.lastPacketMs > LINK_STALE_MS);
+  if (isStale != wasStale) {
+    wasStale = isStale;
+    dataDirty = true;
+  }
+
+  if (millis() - lastFullRedrawMs >= FULL_REFRESH_MS) {
+    fullDirty = true;
+  }
+
+  // touch nav
+  int16_t tx, ty;
+  bool down = readTouch(tx, ty);
+  if (down && !touchWasDown) {
+    touchDownMs = millis();
+    touchStartX = tx;
+    touchWasDown = true;
+  } else if (!down && touchWasDown) {
+    uint32_t held = millis() - touchDownMs;
+    if (millis() - lastTouchNavMs > TOUCH_DEBOUNCE_MS) {
+      if (held > 900) {
+        goHome();
+        lastTouchNavMs = millis();
+      } else if (held < 500) {
+        if (touchStartX < SCR_W / 3) {
+          prevPage();
+          lastTouchNavMs = millis();
+        } else if (touchStartX > (2 * SCR_W) / 3) {
+          nextPage();
+          lastTouchNavMs = millis();
+        }
+      }
+    }
+    touchWasDown = false;
+  }
+
+  if (fullDirty) {
+    drawCurrentPageFull();
+  } else if (dataDirty && (millis() - lastVolatileRedrawMs >= VOLATILE_REFRESH_MS)) {
+    drawCurrentPageVolatile();
+  }
+
+  delay(20);
 }
