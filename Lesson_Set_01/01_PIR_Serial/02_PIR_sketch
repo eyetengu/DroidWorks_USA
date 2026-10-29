@@ -12,47 +12,43 @@ const int SENSOR_ADDR = 64;
 
 String readString(int address) {
   String result = "";
-
   for (int i = 0; i < 32; i++) {
     char character = EEPROM.read(address + i);
-
     if (character == '\0') {
       break;
     }
-
     result += character;
   }
-
   return result;
+}
+
+// Read and announce device identity from EEPROM
+// Comment out the call to this function in setup() until you have written an ID
+void announceDeviceFromEEPROM() {
+  String eid    = readString(EID_ADDR);
+  String type   = readString(TYPE_ADDR);
+  String sensor = readString(SENSOR_ADDR);
+
+  Serial.print("EID:");
+  Serial.print(eid);
+  Serial.print(",TYPE:");
+  Serial.print(type);
+  Serial.print(",SENSOR:");
+  Serial.println(sensor);
 }
 
 void setup() {
   pinMode(pirPin, INPUT);
   pinMode(ledPin, OUTPUT);
-
   Serial.begin(115200);
-
   digitalWrite(ledPin, LOW);
   delay(2000);
 
-  // Read device information from EEPROM
-  String eid = readString(EID_ADDR);
-  String type = readString(TYPE_ADDR);
-  String sensor = readString(SENSOR_ADDR);
-
-  // Announce the device
-  Serial.print("EID:");
-  Serial.print(eid);
-
-  Serial.print(",TYPE:");
-  Serial.print(type);
-
-  Serial.print(",SENSOR:");
-  Serial.println(sensor);
+  // Comment this line out until you have flashed an ID into EEPROM
+  //announceDeviceFromEEPROM();
 
   // Establish initial PIR state after sensor settles
   lastState = digitalRead(pirPin);
-
   Serial.print("pir:");
   Serial.println(lastState);
 }
@@ -62,10 +58,8 @@ void loop() {
 
   if (currentState != lastState) {
     digitalWrite(ledPin, currentState);
-
     Serial.print("pir:");
     Serial.println(currentState);
-
     lastState = currentState;
   }
 
