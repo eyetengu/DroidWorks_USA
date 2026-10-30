@@ -1,7 +1,6 @@
 /*
   DroidWorks U.S.A. – ToF Sensor Module
   Lesson Set 01 | 02_ToF_sketch
-
   VL53L0X wiring:
     VIN → 5V (or 3.3V depending on breakout)
     GND → GND
@@ -13,56 +12,57 @@
 #include <Adafruit_VL53L0X.h>
 #include <EEPROM.h>
 
+// EEPROM addresses
 const int EID_ADDR    = 0;
 const int TYPE_ADDR   = 32;
 const int SENSOR_ADDR = 64;
 
+Adafruit_VL53L0X lox = Adafruit_VL53L0X();
+
 String readString(int address) {
   String result = "";
-
   for (int i = 0; i < 32; i++) {
     char character = EEPROM.read(address + i);
-
     if (character == '\0') {
       break;
     }
-
     result += character;
   }
-
   return result;
 }
 
-Adafruit_VL53L0X lox = Adafruit_VL53L0X();
+// Read and announce device identity from EEPROM
+// Comment out the call to this function in setup() until you have written an ID
+void announceDeviceFromEEPROM() {
+  String eid    = readString(EID_ADDR);
+  String type   = readString(TYPE_ADDR);
+  String sensor = readString(SENSOR_ADDR);
+
+  Serial.print("EID:");
+  Serial.print(eid);
+  Serial.print(",TYPE:");
+  Serial.print(type);
+  Serial.print(",SENSOR:");
+  Serial.println(sensor);
+}
 
 void setup() {
   Serial.begin(115200);
-  
+
   // Wait for serial to be ready
   while (!Serial) {
     delay(1);
   }
   delay(2000);
 
-  String eid = readString(EID_ADDR);
-  String type = readString(TYPE_ADDR);
-  String sensor = readString(SENSOR_ADDR);
-
-  Serial.print("EID: ");
-  Serial.print(eid);
-
-  Serial.print(",TYPE:");
-  Serial.print(type);
-  Serial.print(",SENSOR:");
-  Serial.println(sensor);
-  
+  // Comment this line out until you have flashed an ID into EEPROM
+  announceDeviceFromEEPROM();
 
   // Initialize I2C and the sensor
   if (!lox.begin()) {
     Serial.println(F("tof:error - Failed to boot VL53L0X"));
     while (1);   // Halt if sensor not found
-  }
-  else{
+  } else {
     Serial.println("tof_ready");
   }
 
@@ -72,7 +72,7 @@ void setup() {
 
 void loop() {
   VL53L0X_RangingMeasurementData_t measure;
-  
+
   lox.rangingTest(&measure, false);  // false = no debug output
 
   if (measure.RangeStatus != 4) {    // 4 = out of range
@@ -86,13 +86,3 @@ void loop() {
 
   delay(50);   // ~20 Hz – good balance for ROS
 }
-
-/*   
- Notes
-- Requires the **Adafruit VL53L0X** library (install via Library Manager in the Arduino IDE).
-- Output format is exactly `tof:XXX` (distance in millimeters) so the ROS entry node can parse it cleanly.
-- Prints `tof:0` when the reading is out of range or invalid.
-- Continuous ranging mode is used for smoother updates.
-
-Upload this sketch and test it in the Serial Monitor before moving on to the entry node.
-*/
