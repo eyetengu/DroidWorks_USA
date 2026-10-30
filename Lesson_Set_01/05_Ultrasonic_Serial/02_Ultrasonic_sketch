@@ -1,58 +1,60 @@
 /*
   DroidWorks U.S.A. – Ultrasonic Sensor Module
   Lesson Set 01 | 02_Ultrasonic_sketch
-
   HC-SR04 wiring:
     VCC  → 5V
     GND  → GND
     Trig → D9
     Echo → D10
 */
+
 #include <EEPROM.h>
 
+// EEPROM addresses
 const int EID_ADDR    = 0;
 const int TYPE_ADDR   = 32;
 const int SENSOR_ADDR = 64;
 
+const int trigPin = 9;
+const int echoPin = 10;
+
 String readString(int address) {
   String result = "";
-
   for (int i = 0; i < 32; i++) {
     char character = EEPROM.read(address + i);
-
     if (character == '\0') {
       break;
     }
-
     result += character;
   }
-
   return result;
 }
 
-const int trigPin = 9;
-const int echoPin = 10;
+// Read and announce device identity from EEPROM
+// Comment out the call to this function in setup() until you have written an ID
+void announceDeviceFromEEPROM() {
+  String eid    = readString(EID_ADDR);
+  String type   = readString(TYPE_ADDR);
+  String sensor = readString(SENSOR_ADDR);
+
+  Serial.print("EID:");
+  Serial.print(eid);
+  Serial.print(",TYPE:");
+  Serial.print(type);
+  Serial.print(",SENSOR:");
+  Serial.println(sensor);
+}
 
 void setup() {
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
   pinMode(LED_BUILTIN, OUTPUT);   // optional visual feedback
+
   Serial.begin(115200);
+  delay(2000);   // Only delay in setup
 
-  delay(2000);
-
-  String eid = readString(EID_ADDR);
-  String type = readString(TYPE_ADDR);
-  String sensor = readString(SENSOR_ADDR);
-
-  Serial.print("EID:");
-  Serial.print(eid);
-
-  Serial.print(",TYPE:");
-  Serial.print(type);
-
-  Serial.print(",SENSOR:");
-  Serial.println(sensor);
+  // Comment this line out until you have flashed an ID into EEPROM
+  announceDeviceFromEEPROM();
 
   Serial.println("ultrasonic_ready");
 }
@@ -69,12 +71,10 @@ void loop() {
   long duration = pulseIn(echoPin, HIGH, 30000);
 
   float distance_cm = 0.0;
-  float distance_in = 0.0;
 
   if (duration > 0) {
     // Speed of sound ≈ 0.0343 cm/µs, divide by 2 for round trip
     distance_cm = (duration * 0.0343) / 2.0;
-    distance_in = distance_cm/2.54;
   }
 
   // Print in the exact format expected by the entry node
